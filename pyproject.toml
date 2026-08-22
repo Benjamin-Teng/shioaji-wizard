@@ -1,0 +1,39 @@
+[project]
+name = "shioaji-wizard"
+version = "0.1.0"
+description = "永豐 Shioaji 開通測試精靈：FastAPI 後端＋系統 Chromium --app 殼，模擬下單測試／正式環境憑證測試，逐項列出通過與否及原因"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "shioaji>=1.7.3",
+]
+
+[project.scripts]
+shioaji-wizard = "shioaji_wizard.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shioaji_wizard"]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
+    "pytest",
+    "httpx",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "BLE", "RUF"]
+ignore = ["E501", "S603", "S607", "RUF001", "RUF002", "RUF003"]  # E501：中文訊息字串很長，排版交給 ruff format
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]

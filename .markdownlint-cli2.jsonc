@@ -1,0 +1,9 @@
+{
+  // 與 fcn-pricing 同一套：只豁免表格列與 code block 的行長檢查，其餘預設（80 字）。
+  "config": {
+    "MD013": {
+      "tables": false,
+      "code_blocks": false
+    }
+  }
+}

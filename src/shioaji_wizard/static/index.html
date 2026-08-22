@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shioaji 測試精靈</title>
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<style>
+  /* ── 設計 token：台灣券商「約定書／檢核單」的紙本語彙 ─────────────────────────
+     紙 #F5F6F2（偏綠的檔案紙白）、墨 #1C2A2E、印泥紅 #B8332A（未通過／印章）、
+     竹青 #2E7D5B（通過）、靛藍 #24456B（主要操作、鏈結）、灰 #6B7A7E（說明、未測）。
+     標題用標楷體（DFKai-SB）：政府／券商表單的字，只用在 ≥18px 的標題；內文微軟正黑。*/
+  :root{
+    --paper:#F5F6F2; --card:#FFFFFF; --ink:#1C2A2E; --muted:#6B7A7E; --rule:#D9DED6; --rule-strong:#9AA6A3;
+    --seal:#B8332A; --pass:#2E7D5B; --act:#24456B; --act-ink:#FFFFFF; --warn:#9A6300; --warn-bg:#FFF6E0;
+    --display:"DFKai-SB","BiauKai","標楷體","Noto Serif TC",serif;
+    --sans:"Microsoft JhengHei","PingFang TC","Noto Sans TC","Segoe UI",system-ui,sans-serif;
+    --mono:"Cascadia Mono",Consolas,"Microsoft JhengHei",monospace;
+    --r:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.65 var(--sans)}
+  a{color:var(--act)}
+  button{font:13.5px var(--sans);padding:7px 14px;border-radius:var(--r);border:1px solid var(--rule-strong);background:#fff;color:var(--ink);cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--act)}
+  button.act{background:var(--act);color:var(--act-ink);border-color:var(--act)}
+  button.act:hover:not(:disabled){background:#1b3656}
+  button.big{padding:10px 20px;font-size:14.5px;font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  :focus-visible{outline:2px solid var(--act);outline-offset:2px}
+
+  /* 頂欄 */
+  header{position:sticky;top:0;z-index:5;background:var(--paper);border-bottom:1px solid var(--rule);padding:12px 24px;display:flex;align-items:center;gap:12px}
+  header h1{font:400 22px/1 var(--display);margin:0;letter-spacing:.06em}
+  header .sub{font-size:12px;color:var(--muted);margin-left:4px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header .sub code{font:11.5px var(--mono)}
+
+  main{max-width:1000px;margin:0 auto;padding:14px 24px 40px;display:grid;gap:14px}
+
+  /* 簽名元素：三站通關軌（順序真實存在：設定→模擬測試→正式驗證） */
+  .rail{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:0;background:var(--card);border:1px solid var(--rule);border-radius:var(--r);padding:12px 18px}
+  .rail .st{display:flex;align-items:center;gap:10px;min-width:0}
+  .rail .st .seal{width:44px;height:44px;border-radius:50%;border:2px solid var(--rule-strong);display:grid;place-items:center;font:600 13px var(--display);color:var(--muted);flex:none;background:#fff;transition:transform .25s}
+  .rail .st .seal.PASS{border-color:var(--pass);color:var(--pass)}
+  .rail .st .seal.FAIL{border-color:var(--seal);color:var(--seal);transform:rotate(-8deg)}
+  .rail .st .seal.RUN{border-style:dashed;border-color:var(--act);color:var(--act)}
+  .rail .st .t{font-size:13.5px;line-height:1.3}
+  .rail .st .t b{display:block;font-family:var(--display);font-size:16px;font-weight:400;letter-spacing:.04em}
+  .rail .st .t span{color:var(--muted);font-size:12px}
+  .rail .link{height:1px;width:36px;background:var(--rule-strong);margin:0 10px}
+
+  .banner{border-radius:var(--r);padding:10px 14px;border:1px solid #E8C77A;background:var(--warn-bg);color:#6B4500;font-size:13px}
+  .hidden{display:none !important}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:820px){.grid2{grid-template-columns:1fr}.rail{grid-template-columns:1fr;gap:8px}.rail .link{display:none}}
+  .card{background:var(--card);border:1px solid var(--rule);border-radius:var(--r);padding:16px 18px;min-width:0}
+  .card h2{font:400 18px/1.2 var(--display);letter-spacing:.05em;margin:0 0 10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .card h2 .tag{font:12px/1.4 var(--sans);color:var(--muted);letter-spacing:0;flex:1 1 240px;min-width:0}
+
+  /* 表單 */
+  .f{display:grid;grid-template-columns:96px 1fr;gap:6px 12px;align-items:center;margin:8px 0}
+  .f label{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .f label .setmark{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;font-size:12px;font-weight:700;line-height:1;color:#fff;background:transparent;flex:none}
+  .f label .setmark.on{background:var(--pass)}
+  .f label .setmark.bad{background:var(--seal)}
+  .f label.failed{color:var(--seal)}
+  .f label.saved{color:var(--pass)}
+  .f .hint{grid-column:2;font-size:12px;color:var(--muted);line-height:1.5;margin-top:-2px}
+  input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--rule-strong);border-radius:var(--r);font:13px var(--mono);background:#fff;color:var(--ink)}
+  input::placeholder{color:#9AA6A3;font-family:var(--sans)}
+  input.saved{border-color:var(--pass);background:#EAF5EF}
+  input.missing{border-color:#D9A63A;background:#FFF8E1}
+  input.missing::placeholder{color:#8A6A1F}
+  input.locked{border-color:var(--pass);background:#EAF5EF;color:var(--muted);cursor:not-allowed}
+  input.locked::placeholder{color:var(--pass)}
+  .unlock{font-size:12px;padding:3px 10px;white-space:nowrap;flex:none}
+  .inline{display:flex;gap:8px;align-items:center;min-width:0}
+  .inline input[type=text]{flex:1;min-width:0}
+  .chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);white-space:nowrap}
+  .problems{margin:10px 0 0;padding:0;list-style:none;font-size:13px}
+  .problems li{padding:3px 0 3px 18px;position:relative;color:var(--warn)}
+  .problems li::before{content:"△";position:absolute;left:0;font-size:11px;top:5px}
+  .problems li.ok{color:var(--pass)} .problems li.ok::before{content:"✓"}
+  .problems li.bad{color:var(--seal)} .problems li.bad::before{content:"✗"}
+  .savebar{display:flex;align-items:center;gap:12px;margin-top:12px}
+  .savebar .msg{font-size:13px;color:var(--muted)}
+
+  /* 測試卡 */
+  .test{border-top:1px solid var(--rule);padding:12px 0 4px;display:grid;gap:8px}
+  .test:first-of-type{border-top:none;padding-top:0}
+  .test h3{margin:0;font:400 16px var(--display);letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+  .test h3 .k{display:inline-grid;place-items:center;width:24px;height:24px;border:1.5px solid var(--ink);border-radius:4px;font:600 13px var(--sans)}
+  .test p{margin:0;font-size:13px;color:#3A4A4F}
+  .test p b{color:var(--ink)}
+  .win{font:12.5px/1.55 var(--mono);white-space:pre-wrap;background:var(--paper);border-radius:6px;padding:8px 10px;color:var(--ink)}
+  .win .w{color:var(--warn)} .win .g{color:var(--pass)}
+  .foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:2px}
+  button.toggle{display:inline-flex;align-items:center;gap:10px;padding:9px 16px;font-size:14px;border:1.5px solid var(--rule-strong);background:#fff;color:var(--ink);border-radius:var(--r)}
+  button.toggle .box{display:inline-grid;place-items:center;width:20px;height:20px;border:2px solid var(--rule-strong);border-radius:4px;font-size:14px;font-weight:700;line-height:1;background:#fff;color:transparent}
+  button.toggle:hover:not(:disabled){border-color:var(--pass)}
+  button.toggle[aria-pressed=true]{background:var(--pass);border-color:var(--pass);color:#fff}
+  button.toggle[aria-pressed=true] .box{border-color:#fff;background:#fff;color:var(--pass)}
+  button.toggle small{font-size:12px;opacity:.85}
+
+  /* 輸出 */
+  pre.log{background:#17262B;color:#DDE6E3;border-radius:var(--r);padding:12px 14px;font:12.5px/1.55 var(--mono);max-height:280px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;min-height:58px}
+  .spin{display:inline-block;width:12px;height:12px;border:2px solid #C5D0DC;border-top-color:var(--act);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* 檢核單 */
+  table.sheet{width:100%;border-collapse:collapse;font-size:13px}
+  .sheet th,.sheet td{border-bottom:1px solid var(--rule);padding:7px 8px;text-align:left;vertical-align:top}
+  .sheet th{color:var(--muted);font-weight:600;font-size:12px;letter-spacing:.04em}
+  .sheet td.code{font:12.5px var(--mono);color:var(--muted);white-space:nowrap}
+  .sheet td.reason{color:#3A4A4F;overflow-wrap:anywhere}
+  .sheet td.reason a{word-break:break-all}
+  .stamp{display:inline-block;font:600 12px var(--sans);padding:2px 8px;border-radius:4px;border:1.5px solid currentColor;white-space:nowrap;letter-spacing:.04em}
+  .stamp.PASS{color:var(--pass)} .stamp.FAIL{color:var(--seal);transform:rotate(-3deg)} .stamp.SKIP{color:var(--muted);border-style:dashed}
+  .stamp.fresh{animation:press .35s ease-out}
+  @keyframes press{0%{transform:scale(1.5) rotate(-6deg);opacity:0}70%{transform:scale(.96);opacity:1}100%{transform:scale(1)}}
+  .counts{font-size:13px;color:var(--muted);margin-top:8px}
+  .counts b.bad{color:var(--seal)}
+
+  /* 使用說明 */
+  dialog{border:none;border-radius:12px;max-width:780px;width:92vw;padding:0;color:var(--ink)}
+  dialog::backdrop{background:rgba(28,42,46,.4)}
+  .dh{display:flex;align-items:center;padding:14px 22px;border-bottom:1px solid var(--rule)}
+  .dh h2{margin:0;font:400 20px var(--display);letter-spacing:.06em;flex:1}
+  .db{padding:6px 22px 22px;max-height:72vh;overflow:auto;font-size:13.5px}
+  .db h3{font:400 16px var(--display);letter-spacing:.04em;margin:18px 0 6px;border-left:3px solid var(--act);padding-left:8px}
+  .db code{font:12.5px var(--mono);background:#EEF1EC;padding:1px 5px;border-radius:4px}
+  .db table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .db th,.db td{border-bottom:1px solid var(--rule);padding:5px 6px;text-align:left;vertical-align:top}
+  .db ul,.db ol{padding-left:20px;margin:4px 0}
+  .db li{margin:3px 0}
+
+  @media (prefers-reduced-motion:reduce){.stamp.fresh,.spin,.rail .st .seal{animation:none;transition:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Shioaji 測試精靈</h1>
+  <span class="sub">工作資料夾 <code id="root"></code></span>
+  <button id="btnHelp">使用說明</button>
+  <button id="btnExport" title="把內部紀錄合併成一個 .log 放到本資料夾，回報問題時附上">匯出除錯紀錄</button>
+  <button id="btnRefresh">重新檢查</button>
+</header>
+<main>
+  <nav class="rail" aria-label="進度">
+    <div class="st"><div class="seal" id="sealE">設定</div><div class="t"><b>金鑰與憑證</b><span id="railE">填好 .env</span></div></div>
+    <div class="link"></div>
+    <div class="st"><div class="seal" id="sealA">A</div><div class="t"><b>模擬下單測試</b><span id="railA">永豐開通必做</span></div></div>
+    <div class="link"></div>
+    <div class="st"><div class="seal" id="sealB">B</div><div class="t"><b>正式憑證測試</b><span id="railB">確認能正式下單</span></div></div>
+  </nav>
+
+  <div class="banner hidden" id="cloudBanner"></div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>金鑰與憑證 <span class="tag">存成本資料夾的 .env；Shioaji Pro 與 shioaji server 讀同一份</span></h2>
+      <div class="f"><label for="apiKey"><span class="setmark" id="mkApi"></span>API Key</label><input type="text" id="apiKey" autocomplete="off" spellcheck="false"></div>
+      <div class="f"><label for="secKey"><span class="setmark" id="mkSec"></span>Secret Key</label><div class="inline"><input type="password" id="secKey" autocomplete="new-password"><button type="button" class="unlock hidden" id="btnUnlock" title="金鑰已驗證通過並鎖定；只有要更換金鑰時才需要解鎖">解鎖修改</button></div></div>
+      <div class="f"><span></span><div class="hint">到 <a href="#" data-open="https://www.sinotrade.com.tw/newweb/PythonAPIKey/">永豐金證券 API 管理頁</a> 建立。權限至少勾「行情/資料」＋「交易」；要正式下單再勾「正式環境」。Secret Key 只顯示一次。留空＝保留原值。</div></div>
+      <div class="f"><label for="caPwd"><span class="setmark" id="mkPwd"></span>憑證密碼</label>
+        <div class="inline"><input type="password" id="caPwd" autocomplete="new-password"><label class="chk"><input type="checkbox" id="clearPwd"> 清除</label></div></div>
+      <div class="f"><label for="caPath"><span class="setmark" id="mkPath"></span>憑證檔</label>
+        <div class="inline"><input type="text" id="caPath" spellcheck="false" placeholder="留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔"><button id="btnBrowse">瀏覽…</button><span id="pfxState" style="white-space:nowrap"></span></div></div>
+      <div class="f"><span></span><div class="hint">同一頁按「下載憑證」取得 Sinopac.pfx；下載時設定的密碼就是憑證密碼。放在本資料夾就不用改路徑。只跑 A 可以先不填。<br>若你是用永豐 <b>eLeader</b> 申請的憑證，檔案預設在 <code>C:\ekey\551\(身分證字號)\S</code> 資料夾（只有安裝過 eLeader 的電腦才會有這個位置；憑證密碼舊預設為身分證字號）。<span id="ekeyHint"></span></div></div>
+      <div class="savebar"><button class="act" id="btnSave">儲存設定</button><span class="msg" id="saveMsg"></span></div>
+      <ul class="problems" id="problems"></ul>
+    </section>
+
+    <section class="card">
+      <h2>執行測試</h2>
+      <div class="test">
+        <h3><span class="k">A</span>模擬登入＋模擬下單測試</h3>
+        <p><b>做什麼：</b>在永豐的模擬環境登入並送一筆測試單（永豐金 2890 平盤價 1 張）。這是永豐 API 開通的必經關卡：通過並經審核（約 1 分鐘）後，帳戶才會 <b>signed</b>，Shioaji Pro 才能正式下單。不碰真錢、不需要憑證。</p>
+        <p><b>什麼時候跑：</b>週一～五 08:00–20:00 台灣時間（18:00 後限台灣 IP；國定假日不算）。按下去前會先看你的時間與 IP。</p>
+        <div class="win" id="winA"><span class="spin"></span> 檢查測試時段…</div>
+        <div class="foot"><button type="button" class="toggle" id="futures" aria-pressed="false" title="按一下切換：也測期貨／選擇權"><span class="box">✓</span><span>也測期貨／選擇權 <small>（需已簽期貨 API；只做證券不用按）</small></span></button><button class="act big" id="btnA">執行 A 模擬下單測試</button></div>
+      </div>
+      <div class="test">
+        <h3><span class="k">B</span>正式環境憑證測試</h3>
+        <p><b>做什麼：</b>用金鑰登入正式環境、用 Sinopac.pfx＋憑證密碼啟用憑證，檢查證券／期貨帳戶是否已 signed、密碼對不對、憑證到期日。<b>只查詢、不下單。</b></p>
+        <p><b>需要：</b>API Key 有勾「正式環境」；憑證檔與憑證密碼已填。</p>
+        <div class="foot"><button type="button" class="toggle" id="futuresB" aria-pressed="false" title="按一下切換：也檢查期貨帳戶是否 signed"><span class="box">✓</span><span>也測期貨／選擇權 <small>（需已簽期貨 API；只做證券不用按）</small></span></button><button class="act big" id="btnB">執行 B 正式憑證測試</button></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>執行輸出 <span class="tag" id="jobState"></span></h2>
+    <pre class="log" id="log">還沒執行。設定好金鑰後，從上面選 A 或 B。</pre>
+  </section>
+
+  <section class="card">
+    <h2>檢核單 <span class="tag">每一項：通過／未通過／未測；未通過寫原因</span></h2>
+    <table class="sheet">
+      <thead><tr><th style="width:44px">代號</th><th style="width:30%">項目</th><th style="width:92px">結果</th><th>原因／說明</th></tr></thead>
+      <tbody id="summary"><tr><td colspan="4" style="color:var(--muted)">還沒有結果。</td></tr></tbody>
+    </table>
+    <div class="counts" id="counts"></div>
+  </section>
+</main>
+
+<dialog id="help">
+  <div class="dh"><h2>使用說明</h2><button id="btnHelpClose">關閉</button></div>
+  <div class="db">
+    <h3>這個工具做什麼</h3>
+    <p>完成永豐 Shioaji API 開通必經的「模擬下單測試」，並確認正式環境的憑證可用。設定會存成本資料夾的 <code>.env</code>（<code>SJ_API_KEY</code>、<code>SJ_SEC_KEY</code>、<code>SJ_CA_PASSWD</code>、<code>SJ_CA_PATH</code>），和 Shioaji Pro／<code>shioaji server</code> 讀的是同一套名稱，之後可以直接沿用。</p>
+    <h3>先注意</h3>
+    <ul>
+      <li>不要把這個資料夾放在 OneDrive／Google Drive／Dropbox／iCloud 等會自動同步的地方——<code>.env</code>（金鑰、憑證密碼）與 <code>Sinopac.pfx</code>（憑證本體）會被上傳。</li>
+      <li>測試進行中不要關閉視窗。</li>
+      <li><code>.env</code> 與 <code>Sinopac.pfx</code> 不要分享、不要上傳到任何地方。</li>
+    </ul>
+    <h3>步驟</h3>
+    <ol>
+      <li>到 <a href="#" data-open="https://www.sinotrade.com.tw/newweb/PythonAPIKey/">永豐金證券 API 管理頁</a> 建立 API Key／Secret Key（權限至少「行情/資料」＋「交易」；要正式下單再加「正式環境」）。Secret Key 只顯示一次，先存好。</li>
+      <li>要正式下單的話，同一頁按「下載憑證」取得 <code>Sinopac.pfx</code>，下載時設定的密碼就是憑證密碼。把檔案放進本資料夾（或按「瀏覽」指定位置）。</li>
+      <li>在「金鑰與憑證」填入金鑰（與憑證密碼）→「儲存設定」。</li>
+      <li>執行 <b>A</b>。只在週一～五 08:00–20:00 台灣時間內測試才會被採計；通過後等約 1 分鐘。</li>
+      <li>執行 <b>B</b>，確認 <code>signed=True</code>、憑證密碼正確、憑證未過期。</li>
+      <li>看「檢核單」：每一項通過／未通過／未測與原因。</li>
+    </ol>
+    <h3>畫面上的標示怎麼看</h3>
+    <ul>
+      <li><b>輸入框顏色</b>＝儲存狀態：綠＝已儲存在 .env、黃＝還沒填。一開始打字就變回一般樣式，清空又回到綠／黃。</li>
+      <li><b>標籤前的圓圈</b>＝最近一次測試對這一欄的結果：綠 ✓ 通過、紅 ✗ 卡在這欄（下方會有一行紅字原因）；沒驗過、或改過之後還沒再驗，就是空白。A 只會驗金鑰兩欄，B 才會驗憑證密碼與憑證檔。</li>
+      <li><b>憑證檔欄留空</b>＝使用同資料夾的 Sinopac.pfx；放別處就按「瀏覽…」。用 eLeader 申請的憑證預設在 <code>C:\ekey\551\(身分證字號)\S</code>（只有裝過 eLeader 的電腦才有；偵測到會提供「使用這個」一鍵帶入）。</li>
+      <li><b>金鑰鎖定</b>：A 或 B 通過後，API Key／Secret Key 會鎖起來（Secret Key 只會生成一次，避免誤觸）。只有要更換金鑰時才按「解鎖修改」，貼上新金鑰儲存後要重新跑 A。</li>
+      <li><b>「也測期貨／選擇權」</b>：整顆是切換鈕，按下變綠打勾、再按取消；只做證券不用按。</li>
+      <li><b>進度軌</b>（上方三站）：設定 → A → B，每站顯示目前狀態。</li>
+    </ul>
+    <h3>檢核單代號與常見原因</h3>
+    <table>
+      <tr><th>代號</th><th>項目</th><th>未通過的常見原因</th></tr>
+      <tr><td>E1</td><td>.env 格式／必填金鑰</td><td>金鑰沒填、貼不完整、名稱大小寫錯、檔案不是 UTF-8</td></tr>
+      <tr><td>E2</td><td>憑證密碼已填</td><td>只跑 A 可忽略；要跑 B 必填</td></tr>
+      <tr><td>E3</td><td>憑證檔存在</td><td>Sinopac.pfx 不在路徑指的位置</td></tr>
+      <tr><td>A1</td><td>模擬環境登入</td><td>API Key 不存在／打錯、Secret Key 不成對、Key 過期、沒勾「行情/資料」</td></tr>
+      <tr><td>A2</td><td>證券帳戶</td><td>這組 Key 底下沒有證券帳戶（沒開證券戶，或建 Key 時沒勾該帳戶）</td></tr>
+      <tr><td>A3</td><td>證券模擬下單</td><td>沒勾「交易」、不在測試時段、證券 API 約定書未簽署</td></tr>
+      <tr><td>A4／A5</td><td>期貨帳戶／期貨模擬下單</td><td>沒有期貨帳戶或期貨 API 約定書未簽署；只做證券可忽略（預設不測）</td></tr>
+      <tr><td>B1</td><td>正式環境登入</td><td>API Key 沒勾「正式環境」、金鑰錯誤</td></tr>
+      <tr><td>B2</td><td>證券 signed</td><td><a href="#" data-open="https://www.sinotrade.com.tw/newweb/signCenter/S_openAPI/">證券 API 約定書</a>未簽署；A 還沒做／審核未完成（約 1 分鐘）；簽署時間晚於測試時間（重跑 A）</td></tr>
+      <tr><td>B3</td><td>期貨 signed</td><td><a href="#" data-open="https://www.sinotrade.com.tw/newweb/signCenter/F_openApi/">期貨 API 約定書</a>未簽署或期貨模擬測試沒做；只做證券可忽略</td></tr>
+      <tr><td>B4</td><td>憑證檔存在</td><td>Sinopac.pfx 不在 SJ_CA_PATH 指的位置</td></tr>
+      <tr><td>B5</td><td>憑證啟用</td><td>憑證密碼錯、憑證過期、憑證與帳號不符 → 到 API 管理頁重新下載</td></tr>
+      <tr><td>B6</td><td>憑證有效期</td><td>已過期 → 重新下載；30 天內到期會提醒</td></tr>
+    </table>
+    <h3>常見問題</h3>
+    <ul>
+      <li><b>視窗開不起來：</b>電腦需要 Microsoft Edge 或 Google Chrome（Windows 10/11 內建 Edge）。</li>
+      <li><b>「shioaji 模組載入失敗」：</b>安裝 Microsoft Visual C++ 可轉散發套件後重試。</li>
+      <li><b>換電腦：</b>整個資料夾複製過去即可；<code>.env</code> 與 <code>Sinopac.pfx</code> 自己帶或重新填。</li>
+      <li><b>回報問題：</b>按右上「匯出除錯紀錄」，本資料夾會多一個 <code>shioaji_wizard-debug-日期.log</code>（金鑰與憑證密碼已遮罩、身分證字號只留頭尾；仍含 IP 與帳號資訊，只給協助你的人）。</li>
+    </ul>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const S = { running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, lastStatus:{} };
+  const MARK = {PASS:"✓ 通過", FAIL:"✗ 未通過", SKIP:"－ 未測"};
+
+  const api = async (path, opts={}) => {
+    const r = await fetch(path, Object.assign({headers:{"Content-Type":"application/json"}}, opts));
+    let data = null; try { data = await r.json(); } catch {}
+    if (!r.ok) throw new Error((data && (data.detail || data.error)) || `${r.status} ${r.statusText}`);
+    return data;
+  };
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  // 原因文字裡的 https 網址（永豐簽署頁等）變成可點連結；先 esc 再比對，連結走 /api/open 白名單
+  const linkify = (s) => esc(s).replace(/https:[/][/][^\s）)]+/g, (u) => `<a href="#" data-open="${u}">${u}</a>`);
+
+  function railState(prefix, items){
+    const mine = items.filter(i => i.name.startsWith(prefix));
+    if (!mine.length) return "";
+    if (mine.some(i => i.status === "FAIL")) return "FAIL";
+    if (mine.some(i => i.status === "PASS")) return "PASS";
+    return "";
+  }
+  // 欄位前的標記：已儲存＝綠勾；最近一次 A/B 卡在該欄＝紅叉（依檢核單原因對應欄位）；
+  // 使用者重新儲存該欄後先清掉紅叉（S.cleared），下次測試再判。
+  S.cleared = new Set();
+  function failedFields(items){
+    const bad = new Map();  // key -> 原因（給下方提示清單用）
+    const find = (code) => (items||[]).find(i => i.name.startsWith(code) && i.status === "FAIL");
+    const login = find("A1") || find("B1");
+    if (login){
+      const r = login.reason || "";
+      if (/Secret Key/.test(r)) bad.set("sec", r);
+      else if (/API Key|正式環境|權限/.test(r)) bad.set("api", r);
+      else { bad.set("api", r); bad.set("sec", r); }
+    }
+    const ca = find("B5");
+    if (ca){
+      const r = ca.reason || "";
+      if (/讀不到|SJ_CA_PATH|檔案不存在/.test(r)) bad.set("path", r); else bad.set("pwd", r);
+    }
+    const pf = find("B4");  // E3（還沒放憑證）不算測試結果：只用黃底表示「缺」，不打 ✗
+    if (pf && !bad.has("path")) bad.set("path", pf.reason || "");
+    return bad;
+  }
+  const FIELD_LABEL = {api:"API Key", sec:"Secret Key", pwd:"憑證密碼", path:"憑證檔"};
+  const FIELD_INPUT = {api:"apiKey", sec:"secKey", pwd:"caPwd", path:"caPath"};
+  // A/B 驗過哪些欄位：A1／B1 通過 → 金鑰；B5 通過 → 憑證密碼＋憑證檔；B4 通過 → 憑證檔
+  function verifiedFields(items){
+    const ok = new Set();
+    const pass = (code) => (items||[]).some(i => i.name.startsWith(code) && i.status === "PASS");
+    if (pass("A1") || pass("B1")) { ok.add("api"); ok.add("sec"); }
+    if (pass("B5")) { ok.add("pwd"); ok.add("path"); }
+    if (pass("B4")) ok.add("path");
+    return ok;
+  }
+  function updateMarks(){
+    const e = S.env || {}; const bad = failedFields(S.items); const good = verifiedFields(S.items);
+    const failLi = [];
+    const set = (id, key, saved) => {
+      const m = $(id);
+      // 按了「解鎖修改」→ 金鑰兩欄視為未知（不知道使用者動了沒），✓／✗ 都先拿掉，儲存或下次測試再判
+      const unknown = S.cleared.has(key) || (S.unlockKeys && (key === "api" || key === "sec"));
+      const isBad = bad.has(key) && !unknown;
+      const isGood = !isBad && good.has(key) && !unknown;
+      // 圓圈：只反映最近一次 A/B 的驗證結果（✓ 通過／✗ 卡在這欄），沒驗過就空白
+      m.textContent = isBad ? "✗" : (isGood ? "✓" : "");
+      m.className = "setmark" + (isBad ? " bad" : isGood ? " on" : "");
+      m.title = isBad ? "最近一次測試卡在這個欄位，請確認後重新填寫並儲存" : (isGood ? "最近一次測試通過" : "");
+      m.parentElement.classList.toggle("saved", isGood);
+      m.parentElement.classList.toggle("failed", isBad);
+      // 輸入框：綠＝已儲存、黃＝缺；使用者一開始打字就還原預設（清空又回綠／黃）
+      const inp = $(FIELD_INPUT[key]);
+      const typing = key === "path" ? (inp.value !== (e.ca_path_custom ? (e.ca_path || "") : "")) : inp.value.length > 0;
+      inp.classList.toggle("saved", !typing && !!saved);
+      inp.classList.toggle("missing", !typing && !saved);
+      if (key !== "path"){
+        if (isBad) inp.placeholder = "已儲存，但上次測試在這裡失敗 — 請重新填寫後儲存";
+        else if (inp.placeholder.startsWith("已儲存，但")) inp.placeholder = saved ? "已儲存 — 留空保留" : "";
+      }
+      if (isBad) failLi.push(`${FIELD_LABEL[key]}有問題：${bad.get(key) || "最近一次測試在此失敗"}`);
+    };
+    set("mkApi", "api", !!e.api_key_masked);
+    set("mkSec", "sec", !!e.sec_key_set);
+    set("mkPwd", "pwd", !!e.ca_passwd_set);
+    set("mkPath", "path", !!e.pfx_exists);
+    // 金鑰已被 A/B 驗證通過 → 鎖定兩欄（Secret Key 只會生成一次，別給肥手指機會）；要換要先明示解鎖
+    const lock = !!S.keysLocked && !S.unlockKeys && !S.running;
+    for (const id of ["apiKey","secKey"]){
+      const inp = $(id);
+      inp.disabled = lock || S.running;
+      inp.classList.toggle("locked", lock);
+      if (lock){ inp.value = ""; inp.placeholder = id === "apiKey" ? `已驗證通過 ${e.api_key_masked}（已鎖定）` : "已驗證通過（已鎖定）"; }
+    }
+    $("btnUnlock").classList.toggle("hidden", !(S.keysLocked && !S.unlockKeys));  // force 必須是 boolean，undefined 會變成「翻轉」
+    const ul = $("problems");
+    const keyBad = (bad.has("api") && !S.cleared.has("api")) || (bad.has("sec") && !S.cleared.has("sec"));
+    const envLi = (S.envLi || []).filter(([c]) => !(keyBad && c === "ok")).map(([c,t]) => `<li class="${c}">${esc(t)}</li>`);  // 金鑰被標紅時不再同時說「可以執行 A」
+    ul.innerHTML = envLi.concat(failLi.map(t => `<li class="bad">${esc(t)}</li>`)).join("");
+  }
+  function renderRail(items){
+    const setSeal = (id, st, textId, text) => { const el = $(id); el.className = "seal " + (st||""); if (text) $(textId).textContent = text; };
+    // 設定站只看 E1（金鑰）；E2／E3（憑證）對 A 是選填，缺了只在字上提示、不整顆標紅
+    const e1 = items.find(i => i.name.startsWith("E1")), caMissing = items.some(i => (i.name.startsWith("E2")||i.name.startsWith("E3")) && i.status==="FAIL");
+    const e = e1 ? e1.status : "", a = railState("A", items), b = railState("B", items);
+    setSeal("sealE", e, "railE", e==="PASS" ? (caMissing ? "金鑰就緒（憑證未填，B 需要）" : "金鑰與憑證就緒") : e==="FAIL" ? "金鑰有缺" : "填好 .env");
+    setSeal("sealA", S.running && S.kind==="a" ? "RUN" : a, "railA", a==="PASS" ? "已通過" : a==="FAIL" ? "未通過，看原因" : "永豐開通必做");
+    setSeal("sealB", S.running && S.kind==="b" ? "RUN" : b, "railB", b==="PASS" ? "可以正式下單" : b==="FAIL" ? "未通過，看原因" : "確認能正式下單");
+  }
+  function renderSummary(items){
+    const tb = $("summary");
+    if (!items || !items.length){ tb.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">還沒有結果。</td></tr>'; $("counts").textContent=""; renderRail([]); return; }
+    tb.innerHTML = items.map(i => {
+      const code = i.name.slice(0,2), title = i.name.slice(2).trim();
+      const fresh = S.lastStatus[i.name] && S.lastStatus[i.name] !== i.status ? " fresh" : "";
+      return `<tr><td class="code">${esc(code)}</td><td>${esc(title)}</td><td><span class="stamp ${i.status}${fresh}">${MARK[i.status]||i.status}</span></td><td class="reason">${linkify(i.reason)}</td></tr>`;
+    }).join("");
+    S.lastStatus = Object.fromEntries(items.map(i => [i.name, i.status]));
+    S.items = items; updateMarks();
+    const n = s => items.filter(i=>i.status===s).length;
+    $("counts").innerHTML = `通過 ${n("PASS")}　<b class="${n("FAIL")?"bad":""}">未通過 ${n("FAIL")}</b>　未測 ${n("SKIP")}` + (n("FAIL") ? "　— 未通過的項目依原因處理後再跑一次；只做證券的人可忽略期貨相關項目。" : "");
+    renderRail(items);
+  }
+
+  function applyState(st){
+    const e = st.env;
+    $("root").textContent = st.root;
+    const b = $("cloudBanner");
+    if (st.cloud_sync){ b.classList.remove("hidden"); b.innerHTML = `這個資料夾在雲端同步資料夾裡（路徑含 <b>${esc(st.cloud_sync)}</b>）。.env（金鑰、憑證密碼）與 Sinopac.pfx（憑證本體）會被自動上傳——請把整個資料夾移到本機不同步的位置（例如 C:\\shioaji_wizard），或把它設為不同步。`; } else b.classList.add("hidden");
+    S.env = e; S.cleared = new Set(st.stale || []); S.keysLocked = !!st.keys_locked; updateMarks();
+    // 偵測到 eLeader 預設位置的憑證 → 提供一鍵帶入（只在目前憑證檔找不到時提示）
+    const cands = st.pfx_candidates || []; const eh = $("ekeyHint");
+    if (cands.length && !e.pfx_exists){
+      eh.innerHTML = "<br>偵測到 eLeader 憑證：" + cands.map((p,i) => `<code>${esc(p.replace(/\\([A-Z][12]\d)\d{5}(\d{2})\\/, "\\$1*****$2\\"))}</code> <a href="#" data-usepfx="${esc(p)}">使用這個</a>`).join("、");
+    } else eh.innerHTML = "";
+    $("apiKey").placeholder = e.api_key_masked ? `已儲存 ${e.api_key_masked} — 留空保留` : "尚未填：貼上 API Key";
+    $("secKey").placeholder = e.sec_key_set ? `已儲存（${e.sec_key_len} 字）— 留空保留` : "尚未填：貼上 Secret Key";
+    $("caPwd").placeholder = e.ca_passwd_set ? `已儲存（${e.ca_passwd_len} 字）— 留空保留` : "尚未填：下載憑證時設定的密碼（只跑 A 可先空）";
+    // 憑證檔欄預設留空（placeholder 說明預設位置）；只有使用者自訂過路徑才顯示
+    if (document.activeElement !== $("caPath")) $("caPath").value = e.ca_path_custom ? (e.ca_path || "") : "";
+    $("caPath").placeholder = e.pfx_exists && !e.ca_path_custom ? "已找到同資料夾的 Sinopac.pfx（留空即可）" : "留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔";
+    $("pfxState").innerHTML = e.pfx_exists ? '<span class="stamp PASS">找到憑證</span>' : '<span class="stamp FAIL">找不到</span>';
+    const li = [];
+    if (e.decode_error){ li.push(['bad', '.env 不是 UTF-8 編碼，讀不出來。重新填入金鑰按「儲存設定」會覆寫它；或刪掉 .env 再重開。']); }
+    else {
+      if (!e.exists) li.push(['', '還沒有 .env。填入 API Key 與 Secret Key，按「儲存設定」。']);
+      (e.problems||[]).forEach(p => li.push(['', p]));
+      if (e.exists && e.ok_a && !(e.problems||[]).length) li.push(['ok', '金鑰格式正確，可以執行 A。']);
+      if (e.exists && e.ok_a && e.ca_passwd_set && e.pfx_exists) li.push(['ok', '憑證密碼與憑證檔已儲存，可以執行 B。']);
+      if (e.exists && !e.ca_passwd_set) li.push(['', '沒有憑證密碼：B 不能跑（A 不受影響）。']);
+      if (e.exists && !e.pfx_exists) li.push(['', `找不到憑證檔 ${e.pfx_resolved}：B 不能跑（只跑 A 可忽略）。`]);
+    }
+    S.envLi = li;
+    S.okA = !!e.ok_a; S.okB = !!e.ok_b;
+    updateButtons();
+    document.title = `Shioaji 測試精靈${st.version && st.version!=="dev" ? " v"+st.version : ""}`;
+  }
+  function updateButtons(){
+    const busy = S.running;
+    $("btnA").disabled = busy || !S.okA; $("btnB").disabled = busy || !S.okB;
+    $("btnSave").disabled = busy; $("btnBrowse").disabled = busy; $("futures").disabled = busy; $("futuresB").disabled = busy;
+    $("jobState").innerHTML = busy ? `<span class="spin"></span> ${S.kind==="a"?"A 模擬下單測試":"B 正式憑證測試"}進行中，請不要關閉視窗` : "";
+  }
+  async function refresh(){
+    try { const st = await api("/api/state"); applyState(st); renderSummary(st.summary); if (st.job && st.job.running){ S.running=true; S.kind=st.job.kind; updateButtons(); startPoll(); } }
+    catch (err){ $("problems").innerHTML = `<li class="bad">讀不到狀態：${esc(err.message)}。請按「重新檢查」。</li>`; }
+  }
+  async function checkWindow(){
+    $("winA").innerHTML = '<span class="spin"></span> 檢查測試時段…';
+    try {
+      const w = await api("/api/window");
+      $("winA").innerHTML = `現在台灣時間 ${esc(w.now)}（週${esc(w.weekday)}）\n` + w.notes.map(n => `<span class="${n.startsWith("⚠")?"w":"g"}">${esc(n)}</span>`).join("\n");
+      S.windowGood = !!w.good;
+    } catch (err){ $("winA").textContent = "時段檢查失敗：" + err.message; S.windowGood = true; }
+  }
+  function startPoll(){
+    if (S.pollTimer) return;
+    $("log").textContent = ""; S.since = 0;
+    const tick = async () => {
+      try {
+        const j = await api(`/api/job?since=${S.since}`);
+        if (j.lines && j.lines.length){ $("log").textContent += j.lines.join("\n") + "\n"; $("log").scrollTop = $("log").scrollHeight; }
+        S.since = j.next || S.since;
+        if (j.running){ S.pollTimer = setTimeout(tick, 800); return; }
+        S.running = false; S.pollTimer = null; S.cleared = new Set(j.stale || []);
+        S.unlockKeys = false;  // 跑完測試就結束「解鎖修改」狀態：金鑰若仍驗證通過會重新鎖回
+        $("log").textContent += (j.rc === 0 ? "\n全部通過。" : "\n有項目未通過，看各項原因與下方檢核單。") + "\n";
+        $("log").scrollTop = $("log").scrollHeight;
+        await refresh();
+      } catch (err){ $("log").textContent += "\n（讀取進度失敗：" + err.message + "，重試中）\n"; S.pollTimer = setTimeout(tick, 1500); }
+    };
+    S.pollTimer = setTimeout(tick, 300);
+  }
+  async function run(kind){
+    if (kind === "a"){
+      await checkWindow();
+      if (!S.windowGood && !confirm("現在不在永豐的測試時段（或 IP 不在台灣），送出的測試單很可能不被採計。\n仍要現在送出嗎？")) return;
+    }
+    if (kind === "b" && !confirm("即將以正式環境登入並啟用憑證（只查詢、不下單）。繼續？")) return;
+    try {
+      await api("/api/run", {method:"POST", body: JSON.stringify({kind, futures: kind === "a" ? S.futures : S.futuresB})});
+      S.unlockKeys = false;  // 開始測試＝不再編輯金鑰
+      S.running = true; S.kind = kind; updateButtons(); renderRail(Object.entries(S.lastStatus).map(([name,status])=>({name,status}))); startPoll();
+    } catch (err){ alert("無法開始：" + err.message); }
+  }
+
+  $("btnSave").onclick = async () => {
+    $("saveMsg").textContent = "儲存中…";
+    try {
+      const body = { api_key: $("apiKey").value, sec_key: $("secKey").value, ca_passwd: $("caPwd").value, ca_path: $("caPath").value, clear_ca_passwd: $("clearPwd").checked, unlock_keys: !!S.unlockKeys };
+      const r = await api("/api/env", {method:"POST", body: JSON.stringify(body)});
+      S.cleared = new Set(r.stale || []);
+      $("apiKey").value=""; $("secKey").value=""; $("caPwd").value=""; $("clearPwd").checked=false;
+      S.unlockKeys = false;
+      $("saveMsg").textContent = "已儲存到 .env";
+      await refresh(); renderSummary(r.summary);
+    } catch (err){ $("saveMsg").textContent = "沒存成：" + err.message; }
+  };
+  $("btnBrowse").onclick = async () => {
+    $("btnBrowse").disabled = true;
+    $("saveMsg").textContent = "選檔視窗已開啟（會浮在最前面；若沒看到，請看工作列的「選擇憑證」）…";
+    try { const r = await api("/api/browse", {method:"POST"}); if (r.path){ $("caPath").value = r.path; $("saveMsg").textContent = "已選好憑證，按「儲存設定」生效"; } else { $("saveMsg").textContent = r.error ? "" : "沒有選擇檔案"; if (r.error) alert(r.error); } }
+    catch (err){ $("saveMsg").textContent = ""; alert(err.message); } finally { $("btnBrowse").disabled = false; }
+  };
+  $("btnExport").onclick = async () => {
+    try { const r = await api("/api/export-log", {method:"POST"}); alert("已匯出：\n" + r.path + "\n\n回報問題時附上這個檔（金鑰已遮罩）。"); }
+    catch (err){ alert("匯出失敗：" + err.message); }
+  };
+  ["apiKey","secKey","caPwd","caPath"].forEach(id => $(id).addEventListener("input", updateMarks));
+  $("clearPwd").addEventListener("change", updateMarks);
+  $("btnUnlock").onclick = () => {
+    if (!confirm("金鑰已驗證通過。只有要更換 API Key／Secret Key 時才需要解鎖；解鎖後貼上新金鑰並儲存，之後要重新跑 A 驗證。\n確定解鎖？")) return;
+    S.unlockKeys = true; updateMarks();
+    $("apiKey").placeholder = "貼上新的 API Key（留空保留）"; $("secKey").placeholder = "貼上新的 Secret Key（留空保留）";
+    $("apiKey").focus();
+  };
+  S.futures = false; S.futuresB = false; S.unlockKeys = false;
+  $("futures").onclick = () => { S.futures = !S.futures; $("futures").setAttribute("aria-pressed", String(S.futures)); };
+  $("futuresB").onclick = () => { S.futuresB = !S.futuresB; $("futuresB").setAttribute("aria-pressed", String(S.futuresB)); };
+  $("btnA").onclick = () => run("a");
+  $("btnB").onclick = () => run("b");
+  $("btnRefresh").onclick = () => { refresh(); checkWindow(); };
+  $("btnHelp").onclick = () => $("help").showModal();
+  $("btnHelpClose").onclick = () => $("help").close();
+  document.addEventListener("click", (ev) => {
+    const u = ev.target.closest("a[data-usepfx]");
+    if (u){ ev.preventDefault(); $("caPath").value = u.dataset.usepfx; updateMarks(); $("saveMsg").textContent = "已帶入 eLeader 憑證路徑，按「儲存設定」生效"; return; }
+    const a = ev.target.closest("a[data-open]"); if (!a) return;
+    ev.preventDefault();
+    fetch("/api/open", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url: a.dataset.open})}).catch(()=>{});
+  });
+
+  setInterval(() => fetch("/api/heartbeat", {method:"POST"}).catch(()=>{}), 15000);
+  fetch("/api/heartbeat", {method:"POST"}).catch(()=>{});
+  refresh(); checkWindow();
+})();
+</script>
+</body>
+</html>
