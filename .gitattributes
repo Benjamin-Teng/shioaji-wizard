@@ -1,0 +1,12 @@
+# 換行規則：預設 LF；Windows 批次檔 CRLF；二進位檔不轉換。
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.pfx binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.zip binary
