@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shioaji 開通測試精靈 — 永豐 API 一鍵驗證</title>
+<meta name="description" content="給不懂程式的永豐使用者：填 API 金鑰與憑證，一鍵跑完 Shioaji 開通必經的「模擬下單測試」與「正式環境憑證測試」，逐項列出通過／未通過與原因。免裝 Python，解壓即用。">
+
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="favicon.ico">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Shioaji 開通測試精靈 — 永豐 API 一鍵驗證">
+<meta property="og:description" content="填金鑰與憑證，一鍵跑完模擬下單測試與正式環境憑證測試，逐項列出 ✓／✗ 與原因。免裝 Python，解壓即用。">
+<meta property="og:url" content="https://benjamin-teng.github.io/shioaji-wizard/">
+<meta property="og:image" content="https://benjamin-teng.github.io/shioaji-wizard/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Shioaji 開通測試精靈 — 永豐 API 一鍵驗證">
+<meta name="twitter:image" content="https://benjamin-teng.github.io/shioaji-wizard/og-image.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#070a0f; --bg-soft:#0b0f17; --panel:#111722; --panel2:#19212e; --ink:#070a0e;
+    --border:#1f2937; --border-lit:#3a4657;
+    --text:#e9eff7; --muted:#8a97a8; --faint:#586473;
+    /* 與 finance-calendar 同一家族：金色 accent；✓ 綠／✗ 紅沿用精靈畫面語義 */
+    --accent:#e0aa54; --accent-deep:#b8863a;
+    --ok:#46c98a; --ok-bg:#0e2c1d; --bad:#e0645a; --bad-bg:#2c1618;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+    --serif:"Noto Serif TC",Georgia,"Songti TC",serif;
+    --sans:"Noto Sans TC",-apple-system,"Segoe UI",Roboto,"PingFang TC","Microsoft JhengHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;color:var(--text);font-family:var(--sans);line-height:1.75;font-size:16px;background:var(--bg);
+    background-image:
+      radial-gradient(60rem 32rem at 50% -8rem,rgba(224,170,84,.10),transparent 60%),
+      radial-gradient(48rem 30rem at 100% 10rem,rgba(224,100,90,.05),transparent 60%),
+      radial-gradient(46rem 30rem at 0% 26rem,rgba(70,201,138,.05),transparent 60%);
+    background-attachment:fixed;-webkit-font-smoothing:antialiased}
+  body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+    background-image:linear-gradient(rgba(140,160,190,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(140,160,190,.04) 1px,transparent 1px);
+    background-size:58px 58px;mask-image:radial-gradient(circle at 50% 10%,#000,transparent 80%)}
+  body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.4;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E")}
+  a{color:var(--accent);text-decoration:none}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 22px 96px;counter-reset:sec}
+
+  header{position:relative;padding:84px 22px 44px;text-align:center;border-bottom:1px solid var(--border)}
+  header .tag{display:inline-flex;align-items:center;gap:.6em;color:var(--accent);font-family:var(--mono);
+    font-weight:500;font-size:.74rem;letter-spacing:.3em;text-transform:uppercase}
+  header .tag::before,header .tag::after{content:"";width:26px;height:1px;background:linear-gradient(90deg,transparent,var(--accent-deep))}
+  header .tag::after{transform:scaleX(-1)}
+  header h1{font-family:var(--serif);font-weight:900;font-size:clamp(2.1rem,5.6vw,3.4rem);line-height:1.16;
+    margin:16px auto 0;max-width:22ch;letter-spacing:-.01em;
+    background:linear-gradient(180deg,#fff,#c7b48f);-webkit-background-clip:text;background-clip:text;color:transparent}
+  header .ver{display:inline-block;margin-top:15px;font-family:var(--mono);font-size:.76rem;color:var(--muted);
+    border:1px solid var(--border-lit);border-radius:30px;padding:4px 14px;background:rgba(224,170,84,.06)}
+  header .ver b{color:var(--accent);font-weight:600}
+  header p.lead{color:var(--muted);max-width:620px;margin:20px auto 0;font-size:1.06rem}
+  header p.lead .ok{color:var(--ok)} header p.lead .bad{color:var(--bad)}
+
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+  .btn{display:inline-flex;align-items:center;gap:.5em;font-family:var(--sans);font-weight:700;font-size:1rem;
+    padding:13px 26px;border-radius:12px;border:1px solid transparent;cursor:pointer;transition:transform .2s,box-shadow .2s,border-color .2s,background .2s}
+  .btn-primary{background:linear-gradient(180deg,#e9b968,#d29a3f);color:#241802;box-shadow:0 8px 26px rgba(224,170,84,.28)}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(224,170,84,.4)}
+  .btn-ghost{background:var(--panel);color:var(--text);border-color:var(--border-lit)}
+  .btn-ghost:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .install-hint{margin:26px auto 0;max-width:660px;font-size:1.02rem;color:#f2dcae;text-align:center;
+    background:linear-gradient(180deg,rgba(224,170,84,.12),rgba(224,170,84,.05));
+    border:1px solid rgba(224,170,84,.42);border-radius:14px;padding:15px 24px;box-shadow:0 6px 22px rgba(224,170,84,.10)}
+  .install-hint b{color:var(--accent);font-weight:700}
+  .install-hint .big{font-family:var(--serif);font-weight:700}
+
+  .shot{margin:44px auto 0;max-width:1000px;border:1px solid var(--border-lit);border-radius:16px;overflow:hidden;
+    box-shadow:0 30px 70px rgba(0,0,0,.55);background:var(--ink)}
+  .shot img{display:block;width:100%;height:auto}
+
+  section{margin-top:70px;counter-increment:sec}
+  section>h2{font-family:var(--serif);font-weight:700;font-size:1.55rem;margin:0 0 4px;display:flex;flex-direction:column;gap:2px}
+  section>h2::before{content:counter(sec,decimal-leading-zero);font-family:var(--mono);font-weight:600;font-size:.78rem;letter-spacing:.2em;color:var(--accent);opacity:.85}
+  section>p.sub{margin:6px 0 0;color:var(--muted)}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:22px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg-soft));border:1px solid var(--border);border-radius:14px;
+    padding:24px 22px;transition:transform .25s,border-color .25s,box-shadow .25s}
+  .card:hover{transform:translateY(-4px);border-color:var(--border-lit);box-shadow:0 12px 30px rgba(0,0,0,.4)}
+  .card .ic{font-size:1.5rem}
+  .card h3{margin:10px 0 6px;font-size:1.08rem;font-weight:700}
+  .card p{margin:0;color:var(--muted);font-size:.94rem}
+  .card .ok{color:var(--ok)} .card .bad{color:var(--bad)}
+  .card code{font-family:var(--mono);font-size:.86em;background:var(--panel2);padding:1px 7px;border-radius:6px;color:var(--accent)}
+
+  /* 檢核項目清單：模擬精靈畫面的 ✓／✗ 語義 */
+  .checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:22px}
+  .checks .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+  .checks h3{margin:0 0 10px;font-size:1.02rem;display:flex;align-items:center;gap:.6em}
+  .checks h3 .k{font-family:var(--mono);font-weight:700;font-size:.8rem;letter-spacing:.1em;color:var(--accent);
+    border:1px solid rgba(224,170,84,.4);border-radius:6px;padding:1px 8px;background:rgba(224,170,84,.08)}
+  .checks ul{list-style:none;margin:0;padding:0;font-size:.92rem;color:var(--muted)}
+  .checks li{display:flex;gap:.6em;padding:5px 0;border-top:1px solid var(--border)}
+  .checks li:first-child{border-top:0}
+  .checks li .n{font-family:var(--mono);color:var(--faint);min-width:2.2em}
+  .checks li .m{width:1.2em;height:1.2em;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    font-size:.72rem;font-weight:700;flex:none;margin-top:.3em;background:var(--ok-bg);color:var(--ok);border:1px solid rgba(70,201,138,.4)}
+  .checks p.note{margin:10px 0 0;font-size:.86rem;color:var(--faint)}
+
+  .steps{list-style:none;counter-reset:st;padding:0;margin:22px 0 0}
+  .steps li{counter-increment:st;position:relative;padding:16px 20px 16px 62px;margin-top:12px;
+    background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;color:var(--muted)}
+  .steps li::before{content:counter(st);position:absolute;left:18px;top:50%;transform:translateY(-50%);
+    width:28px;height:28px;border-radius:50%;background:rgba(224,170,84,.12);color:var(--accent);
+    font-family:var(--mono);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:.9rem}
+  .steps li b{color:var(--text)}
+  .steps li b.hl{color:var(--accent)}
+  .steps code{font-family:var(--mono);font-size:.86em;background:var(--panel2);padding:1px 7px;border-radius:6px;color:var(--accent)}
+  .tip{margin-top:16px;font-size:.9rem;color:var(--faint);font-family:var(--mono)}
+
+  .faq{margin-top:22px;display:grid;gap:12px}
+  .faq details{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:0 20px}
+  .faq summary{cursor:pointer;padding:14px 0;font-weight:700;list-style:none;display:flex;gap:.6em;align-items:center}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::before{content:"＋";font-family:var(--mono);color:var(--accent);width:1.2em}
+  .faq details[open] summary::before{content:"－"}
+  .faq details>div{padding:0 0 16px 1.8em;color:var(--muted);font-size:.94rem}
+  .faq details>div p{margin:0 0 8px}
+  .faq code{font-family:var(--mono);font-size:.86em;background:var(--panel2);padding:1px 7px;border-radius:6px;color:var(--accent)}
+
+  footer{margin-top:80px;padding-top:26px;border-top:1px solid var(--border);text-align:center;color:var(--faint);font-size:.86rem}
+  footer a{color:var(--muted)} footer a:hover{color:var(--accent)}
+  footer .src{margin-top:8px;font-family:var(--mono);font-size:.74rem;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="tag">永豐金證券 · Shioaji API</span>
+  <h1>Shioaji 開通測試精靈</h1>
+  <div class="ver">目前版本 <b id="ver">v0.0</b> · Windows 10/11（x64）</div>
+  <p class="lead">填入 API 金鑰與憑證，一鍵跑完永豐 API 開通必經的「模擬下單測試」與「正式環境憑證測試」，逐項列出 <span class="ok">✓</span>／<span class="bad">✗</span> 與原因。不用裝 Python、不用打指令，解壓即用。</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest/download/shioaji-wizard.zip">⬇ 下載最新版</a>
+    <a class="btn btn-ghost" href="https://github.com/Benjamin-Teng/shioaji-wizard">GitHub 原始碼</a>
+  </div>
+  <div class="install-hint">📦 <span class="big">下載解壓後，雙擊 <b>wizard.exe</b> 就能開始</span> — 零安裝、零依賴；把永豐憑證檔放到同一個資料夾、改名 <b>Sinopac.pfx</b> 即可測憑證。</div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <h2>特色</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="ic">🧭</div><h3>一頁完成、逐項對答案</h3>
+        <p>按一顆按鈕就跑完整套測試，畫面列出每一步 <span class="ok">✓</span>／<span class="bad">✗</span>／－ 與原因；卡在哪一欄，欄位前的圓圈直接標給你看。</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔐</div><h3>金鑰不離開你的電腦</h3>
+        <p>全程本機執行，只連永豐官方 API。所有輸出與匯出的除錯紀錄都<b>自動遮罩</b>金鑰與身分證字號；Secret Key 驗證通過後自動鎖定，不怕誤觸改掉。</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔁</div><h3>設定直接沿用</h3>
+        <p>金鑰與憑證路徑存成程式同層的 <code>.env</code>，欄位名稱與 Shioaji Pro／<code>shioaji server</code> 相同，測通後其他工具直接讀同一份。</p>
+      </div>
+      <div class="card">
+        <div class="ic">📦</div><h3>零安裝 portable</h3>
+        <p>內建 Python 與所有套件，解壓後資料夾只看得到 <code>wizard.exe</code>。用 Windows 內建的 Edge 開視窗，關窗即完全結束。</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="shot"><img src="hero.png" alt="Shioaji 開通測試精靈畫面：金鑰與憑證四欄、A 模擬下單測試與 B 正式環境憑證測試按鈕、執行輸出與檢核單"></div>
+
+  <section>
+    <h2>兩套測試，對應永豐開通流程</h2>
+    <p class="sub">永豐要求先在模擬環境完成下單測試，簽署後才開放正式環境；憑證則要在正式環境驗證能否簽章。精靈把兩段各拆成獨立檢核項目。</p>
+    <div class="checks">
+      <div class="box">
+        <h3><span class="k">A</span>模擬登入＋模擬下單測試</h3>
+        <ul>
+          <li><span class="n">A1</span><span class="m">✓</span>模擬環境登入（API Key／Secret Key）</li>
+          <li><span class="n">A2</span><span class="m">✓</span>證券帳戶</li>
+          <li><span class="n">A3</span><span class="m">✓</span>證券模擬下單（永豐金 2890 平盤價 1 張）</li>
+          <li><span class="n">A4</span><span class="m">✓</span>期貨帳戶（勾「也測期貨／選擇權」才測）</li>
+          <li><span class="n">A5</span><span class="m">✓</span>期貨模擬下單（同上）</li>
+        </ul>
+        <p class="note">執行前自動檢查台灣時間（週一～五 08:00–20:00）；通過並經永豐審核後帳戶才會 signed，未通過的項目會附永豐簽署頁連結，點一下就開。</p>
+      </div>
+      <div class="box">
+        <h3><span class="k">B</span>正式環境憑證測試</h3>
+        <ul>
+          <li><span class="n">B1</span><span class="m">✓</span>正式環境登入</li>
+          <li><span class="n">B2</span><span class="m">✓</span>證券 API 簽署＋模擬測試審核（signed）</li>
+          <li><span class="n">B3</span><span class="m">✓</span>期貨 API 簽署（勾「也測期貨／選擇權」才測）</li>
+          <li><span class="n">B4</span><span class="m">✓</span>憑證檔存在（Sinopac.pfx／SJ_CA_PATH）</li>
+          <li><span class="n">B5</span><span class="m">✓</span>憑證啟用（憑證密碼）</li>
+          <li><span class="n">B6</span><span class="m">✓</span>憑證有效期（顯示到期日）</li>
+        </ul>
+        <p class="note">密碼錯、路徑錯、金鑰打錯字，各自會有明確的中文原因，不用看英文錯誤訊息猜。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>三步驟開始</h2>
+    <ol class="steps">
+      <li><b>下載並解壓</b>（上方「下載最新版」）。解壓後只會看到 <code>wizard.exe</code>，其餘程式檔案已隱藏。</li>
+      <li>把永豐提供的憑證檔複製到同一個資料夾、改名 <b class="hl">Sinopac.pfx</b>（只跑 A 模擬測試可略過；裝過 eLeader 的電腦會自動偵測 <code>C:\ekey\551\…</code> 並提供一鍵帶入）。</li>
+      <li>雙擊 <b>wizard.exe</b>，填入 <b>API Key／Secret Key／憑證密碼</b>，按 <b class="hl">A</b> 或 <b class="hl">B</b> 開始 — 完成 ✅ 逐項看結果。</li>
+    </ol>
+    <p class="tip">＞ 金鑰在永豐「API 申請」頁面產生；Secret Key 只會顯示一次，請先存好再貼進精靈。</p>
+  </section>
+
+  <section>
+    <h2>常見問題</h2>
+    <div class="faq">
+      <details>
+        <summary>Windows 跳出「SmartScreen 已保護您的電腦」，每次開都跳？</summary>
+        <div>
+          <p>從網路下載的檔案帶有「來源標記」（Mark of the Web），部分解壓縮軟體會把它套到解出來的 exe；「仍要執行」只對當次有效，所以會反覆跳。擇一根治：</p>
+          <p>• <b>對現在這一份</b>：在 <code>wizard.exe</code> 上按右鍵 → 內容 → 勾「解除封鎖」→ 確定。</p>
+          <p>• <b>下次下載時</b>：先在下載的 <code>.zip</code> 上按右鍵 → 內容 → 勾「解除封鎖」→ 確定，再解壓，解出來的檔案就是乾淨的。</p>
+        </div>
+      </details>
+      <details>
+        <summary>需要先裝 Python 或其他東西嗎？</summary>
+        <div><p>不用。資料夾內已內建 Python 與全部套件；只需要 Windows 10／11（x64）與內建的 Microsoft Edge（或 Google Chrome）。</p></div>
+      </details>
+      <details>
+        <summary>資料夾可以放在 OneDrive／Google 雲端硬碟裡嗎？</summary>
+        <div><p>請不要。同步軟體可能鎖檔或延遲寫入，造成 <code>.env</code> 或憑證讀取失敗。放在本機一般資料夾（例如桌面或「文件」）即可。</p></div>
+      </details>
+      <details>
+        <summary>測試失敗要怎麼回報？</summary>
+        <div>
+          <p>畫面上按「匯出除錯紀錄」，會在同資料夾產生 <code>shioaji_wizard-debug-*.log</code>（金鑰全文遮罩、身分證字號只留頭尾），到 <a href="https://github.com/Benjamin-Teng/shioaji-wizard/issues">GitHub Issues</a> 附上即可。</p>
+          <p>若視窗根本開不起來，雙擊資料夾內的 <code>啟動（除錯）.bat</code> 可看到即時錯誤訊息。</p>
+        </div>
+      </details>
+      <details>
+        <summary>解壓後看得到 python 資料夾？</summary>
+        <div><p>用 Windows 檔案總管「解壓縮全部」會保留隱藏屬性；某些工具不會，這不影響運作，第一次啟動 <code>wizard.exe</code> 後就會自動隱藏。</p></div>
+      </details>
+    </div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/Benjamin-Teng/shioaji-wizard">GitHub</a> ·
+    <a href="https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest/download/shioaji-wizard.zip">最新版下載</a> ·
+    <a href="https://github.com/Benjamin-Teng/shioaji-wizard#readme">說明文件</a> ·
+    <a href="https://github.com/Benjamin-Teng/shioaji-wizard/issues">問題回報</a>
+    <div class="src">非永豐金證券官方軟體 · 使用永豐 Shioaji 官方 Python SDK · 所有資料只在你的電腦與永豐 API 之間傳輸</div>
+  </footer>
+
+</div>
+<script>
+/* 版本號自動跟隨 GitHub「最新已發布 release」——與「下載最新版」按鈕同源。
+   抓取失敗（離線/API 限流）就沿用 HTML 內的靜態哨兵 v0.0（看到 v0.0 = 自動抓取失效，別手改成真版號）。 */
+(function () {
+  var el = document.getElementById('ver');
+  if (!el) return;
+  fetch('https://api.github.com/repos/Benjamin-Teng/shioaji-wizard/releases/latest', {
+    headers: { Accept: 'application/vnd.github+json' }
+  })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (d) { if (d && d.tag_name) el.textContent = d.tag_name; })
+    .catch(function () { /* 沿用靜態版本值 */ });
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,8 @@
 # shioaji-wizard
 
+> **一般使用者請到下載頁：<https://benjamin-teng.github.io/shioaji-wizard/>**
+> （免裝 Python，解壓後雙擊 `wizard.exe`）。以下為開發文件。
+
 永豐 Shioaji 開通測試精靈：本機 FastAPI 後端＋系統 Chromium `--app` 殼的
 一頁式桌面工具，給完全不懂技術的使用者完成永豐 API 開通必經的「模擬下單
 測試」（A）與「正式環境憑證測試」（B），逐項列出通過／未通過與原因。設定存成
