@@ -91,5 +91,6 @@ dist/shioaji_wizard/
 
 除 `wizard.exe`／`啟動（除錯）.bat`／`.env`／`*.pfx`／`*.log` 外，其餘項目在打包時與每次啟動時都
 會被 best-effort 設為隱藏（打包端 `hide_bundle_top_level`；啟動端
-`tools/launcher.cs` 的 `RehideTopLevel`——zip 解壓不保證保留隱藏屬性，所以兩
-邊都做）。啟動提示（splash）在瀏覽器視窗送出啟動後約 1.5 秒消失。
+`tools/launcher.cs` 的 `RehideTopLevel`）。zip 條目另把隱藏屬性寫進
+`external_attr`，Explorer「解壓縮全部」／7-Zip 會照著還原；`Expand-Archive`／
+`tar` 不會，那種情況第一次啟動 `wizard.exe` 後才會隱藏。啟動提示（splash）在瀏覽器視窗送出啟動後約 1.5 秒消失。

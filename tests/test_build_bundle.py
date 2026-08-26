@@ -446,3 +446,29 @@ def test_finalize_preserves_user_files_and_zip_excludes_them(tmp_path):
     names = zipfile.ZipFile(zips[0]).namelist()
     assert any(n.endswith("wizard.exe") for n in names)
     assert not any(n.endswith(".env") or n.endswith(".pfx") for n in names)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows hidden 屬性")
+def test_release_zip_carries_dos_hidden_attribute(tmp_path):
+    """zip 條目要把磁碟上的 Windows hidden 屬性寫進 external_attr 低位元組
+    （FILE_ATTRIBUTE_HIDDEN=0x02），Explorer「解壓縮全部」才會解出仍隱藏的
+    python/、README.txt；wizard.exe 不得帶 hidden。"""
+    from build_bundle import write_release_zip
+
+    from shioaji_wizard.sjenv import hide_path
+
+    src = tmp_path / "src"
+    (src / "python").mkdir(parents=True)
+    (src / "python" / "a.dll").write_bytes(b"x")
+    (src / "README.txt").write_text("r", encoding="utf-8")
+    (src / "wizard.exe").write_bytes(b"e")
+    hide_path(src / "python")
+    hide_path(src / "README.txt")
+    out = tmp_path / "out.zip"
+    write_release_zip(src, out, top_name="shioaji_wizard")
+    attrs = {i.filename: i.external_attr & 0xFF for i in zipfile.ZipFile(out).infolist()}
+    assert attrs["shioaji_wizard/python/"] & 0x02
+    assert attrs["shioaji_wizard/python/"] & 0x10  # 目錄旗標
+    assert attrs["shioaji_wizard/README.txt"] & 0x02
+    assert not attrs["shioaji_wizard/wizard.exe"] & 0x02
+    assert zipfile.ZipFile(out).read("shioaji_wizard/python/a.dll") == b"x"

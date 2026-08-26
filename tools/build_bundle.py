@@ -19,8 +19,9 @@ bundle）。
   ``shioaji_wizard``（不帶版本——每次都內容覆蓋式更新，版本號只留在 zip
   檔名＋launcher 版本資源）；頂層除 ``wizard.exe``／``.env``／``*.pfx``／
   ``*.log`` 外全設 Windows hidden 屬性（``python/``、啟動（除錯）.bat、
-  README.txt、執行期才出現的 ``.runtime/``）。zip 解壓不保證保留 hidden
-  屬性，故 launcher.cs 啟動時也會 best-effort 重設一次。
+  README.txt、執行期才出現的 ``.runtime/``）。zip 條目也把 hidden 寫進
+  ``external_attr``（Explorer／7-Zip 解壓會還原；``Expand-Archive``／``tar``
+  不會），故 launcher.cs 啟動時也會 best-effort 重設一次。
 """
 
 from __future__ import annotations
@@ -597,9 +598,27 @@ def _is_user_file(name: str) -> bool:
     return name == ".env" or name.lower().endswith(".pfx")
 
 
+def _dos_attributes(path: Path) -> int:
+    """回傳 Windows 檔案屬性的低 8 位元（MS-DOS 屬性：hidden=0x02、directory=0x10
+    …），非 Windows 或讀不到回 0。zip 規格把這一位元組放在 ``external_attr``
+    低位元組，Explorer「解壓縮全部」／7-Zip 解壓時會照它還原 hidden。"""
+    if os.name != "nt":
+        return 0
+    import ctypes
+
+    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))  # type: ignore[attr-defined]
+    return 0 if attrs == -1 else attrs & 0xFF
+
+
 def write_release_zip(src_dir: Path, zip_path: Path, *, top_name: str) -> None:
     """把 src_dir 打成 zip，頂層資料夾名固定為 top_name；根層的 .env／*.pfx 一律不收
-    （雙重保險：就算 src_dir 不乾淨，出貨 zip 也不會帶金鑰）。"""
+    （雙重保險：就算 src_dir 不乾淨，出貨 zip 也不會帶金鑰）。
+
+    每個條目的 ``external_attr`` 低位元組寫入磁碟上的 MS-DOS 屬性
+    （:func:`_dos_attributes`）——``ZipFile.write`` 只會放 Unix mode 到高
+    16 位、低位元組永遠是 0，解出來的 ``python/``／README.txt 就不會是
+    hidden。Explorer 與 7-Zip 會照這個位元組還原；``Expand-Archive``／``tar``
+    不會，那些情境靠 launcher 的 ``RehideTopLevel`` 補。"""
     import zipfile
 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -608,10 +627,14 @@ def write_release_zip(src_dir: Path, zip_path: Path, *, top_name: str) -> None:
             if len(rel.parts) == 1 and _is_user_file(rel.name):
                 continue
             arc = Path(top_name, *rel.parts).as_posix()
+            info = zipfile.ZipInfo.from_file(f, arc)
+            info.external_attr |= _dos_attributes(f)
             if f.is_dir():
-                zf.writestr(arc + "/", "")
+                zf.writestr(info, b"")
             else:
-                zf.write(f, arc)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                with f.open("rb") as src, zf.open(info, "w") as dst:
+                    shutil.copyfileobj(src, dst)
 
 
 def preserve_user_files(old: Path, new: Path) -> list[str]:
