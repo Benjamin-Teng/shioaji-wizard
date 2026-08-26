@@ -1,6 +1,6 @@
 [project]
 name = "shioaji-wizard"
-version = "0.1.0"
+version = "0.1.1"
 description = "永豐 Shioaji 開通測試精靈：FastAPI 後端＋系統 Chromium --app 殼，模擬下單測試／正式環境憑證測試，逐項列出通過與否及原因"
 requires-python = ">=3.12"
 dependencies = [

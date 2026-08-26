@@ -356,3 +356,103 @@ def test_find_eleader_pfx(env_mods, tmp_path: Path, monkeypatch: pytest.MonkeyPa
     found = server.find_eleader_pfx(base)
     assert found == [str(base / "A123456789" / "S" / "Sinopac.pfx")]
     assert server.find_eleader_pfx(tmp_path / "nope") == []
+
+
+def test_report_reason_redacted_before_session(
+    env_mods, client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """子行程 report.json 的 reason（永豐錯誤原文可能回顯金鑰）進 SESSION／總覽前也要遮罩。"""
+    _, server = env_mods
+    client.post("/api/env", json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_passwd": "", "ca_path": ""})
+    mod = tmp_path / "fakereport.py"
+    mod.write_text(
+        "from shioaji_wizard.sjenv import Report\n"
+        f"Report().add('A1 模擬環境登入', 'FAIL', 'key {FAKE_KEY} not exist; id A123456789')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    job = server.Job("a")
+    server._run_job(job, "fakereport", [])
+    reason = server.SESSION["A1 模擬環境登入"]["reason"]
+    assert FAKE_KEY not in reason and "A123456789" not in reason
+    assert "[已遮罩]" in reason and "A12*****89" in reason
+    assert FAKE_KEY not in client.get("/api/summary").text
+    assert FAKE_KEY not in client.get("/api/job").text  # 輪詢端點回的 job.report 也必須是遮罩版
+    assert FAKE_KEY not in client.get("/api/state").text
+
+
+def test_post_env_rejects_newlines(client, tmp_path: Path):
+    """值含換行會在 .env 注入第二個鍵（繞過金鑰鎖定），一律 400 且不寫檔。"""
+    r = client.post(
+        "/api/env",
+        json={
+            "api_key": FAKE_KEY,
+            "sec_key": FAKE_SEC,
+            "ca_passwd": "",
+            "ca_path": "C:/a.pfx\nSJ_API_KEY=INJECTED",
+        },
+    )
+    assert r.status_code == 400
+    assert not (tmp_path / ".env").exists() or "INJECTED" not in (tmp_path / ".env").read_text(
+        encoding="utf-8"
+    )
+    r = client.post(
+        "/api/env",
+        json={"api_key": FAKE_KEY, "sec_key": "x\r\nSJ_API_KEY=INJECTED", "ca_passwd": "", "ca_path": ""},
+    )
+    assert r.status_code == 400
+
+
+def test_redact_masks_person_id_even_when_short_secret_is_substring(env_mods):
+    """憑證密碼 1234 是身分證字號 A123456789 的子字串：先遮身分證再換密碼，中段不能露出。"""
+    _, server = env_mods
+    out = server._redact_text("id A123456789 pw 1234", {"1234"})
+    assert "1234" not in out and "56789" not in out and "A123456789" not in out
+    assert "B28*****21" in server._redact_text("x B287654321 y", {"1234"})
+
+
+def test_redact_secret_containing_person_id_fragment_is_fully_masked(env_mods):
+    """密碼本身含身分證格式片段（pw-A123456789-x）：整段 [已遮罩]，前後段不能露；另一個純身分證只打碼中段。"""
+    _, server = env_mods
+    out = server._redact_text("pw=pw-A123456789-x id=B287654321", {"pw-A123456789-x"})
+    assert out == "pw=[已遮罩] id=B28*****21"
+    out = server._redact_text("k=" + FAKE_KEY + " A123456789 " + FAKE_SEC, {FAKE_KEY, FAKE_SEC})
+    assert FAKE_KEY not in out and FAKE_SEC not in out and "A123456789" not in out
+
+
+def test_api_responses_are_no_store(client):
+    assert client.get("/api/state").headers["Cache-Control"] == "no-store"
+
+
+def test_redact_partially_overlapping_secrets_are_unioned(env_mods):
+    """兩個秘密在原文上部分重疊（互不包含）：取區間聯集整段遮罩，不能只遮前一個而露出後一個尾段。"""
+    _, server = env_mods
+    out = server._redact_text("x ABCDEFGHIJKLMN y", {"ABCDEFGH", "HIJKLMN"})
+    assert out == "x [已遮罩] y"
+
+
+def test_redact_is_near_linear_on_repetitive_text(env_mods):
+    """短秘密（aaaa）在重複文字上：匯出 log 可達數百 KB，遮罩不能是平方時間。"""
+    import time as _t
+
+    _, server = env_mods
+    text = "a" * 400_000
+    t0 = _t.perf_counter()
+    out = server._redact_text(text, {"aaaa"})
+    assert "aaaa" not in out
+    assert _t.perf_counter() - t0 < 2.0
+
+
+def test_post_env_rejects_unicode_line_separators(client, tmp_path: Path):
+    """parse_env_text 用 splitlines()：U+2028／U+2029／NEL／VT／FF 也算分行，守衛必須用同一套判準。"""
+    for code in (0x2028, 0x2029, 0x85, 0x0B, 0x0C):
+        body = {
+            "api_key": "",
+            "sec_key": "",
+            "ca_passwd": "",
+            "ca_path": "C:/x" + chr(code) + "SJ_API_KEY=INJECTED",
+        }
+        r = client.post("/api/env", json=body)
+        assert r.status_code == 400, hex(code)
+    env = tmp_path / ".env"
+    assert not env.exists() or "INJECTED" not in env.read_text(encoding="utf-8")

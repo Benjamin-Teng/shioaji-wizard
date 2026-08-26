@@ -52,7 +52,7 @@ def _install_guards(app: FastAPI) -> None:
 
     註冊順序講究：Starlette 的 user_middleware 疊法是後註冊者最外層（見
     ``Router.build_middleware_stack``），``_cache_control`` 要包住整個鏈
-    （連 ``_origin_guard`` 提早短路的 403 也要蓋到 no-cache），故必須排在
+    （連 ``_origin_guard`` 提早短路的 403 也要蓋到 no-store），故必須排在
     ``_origin_guard`` **之後**註冊。"""
 
     @app.middleware("http")
@@ -75,8 +75,8 @@ def _install_guards(app: FastAPI) -> None:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         """回應快取修正：HTML／JSON 全靠瀏覽器 heuristic freshness 會讓部署後
-        看不到新版，一律加 ``Cache-Control: no-cache``，除 ``/static/*``。"""
+        看不到新版，一律加 ``Cache-Control: no-store``，除 ``/static/*``。"""
         response = await call_next(request)
         if not request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "no-cache"
+            response.headers["Cache-Control"] = "no-store"
         return response

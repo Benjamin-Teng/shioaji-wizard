@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from shioaji_wizard.guards import install_guards
+from shioaji_wizard.shell import _POWERSHELL
 from shioaji_wizard.sjenv import (
     DEFAULT_PFX,
     ENV_PATH,
@@ -396,9 +397,15 @@ def _run_job(job: Job, module: str, args: list[str]) -> None:
             job.lines.append(f"✗ {timeout_reason}")
         if report_file.is_file():
             try:
-                job.report = json.loads(report_file.read_text(encoding="utf-8"))
+                raw_report = json.loads(report_file.read_text(encoding="utf-8"))
             except (ValueError, OSError):
-                job.report = []
+                raw_report = []
+            # 永豐錯誤原文可能回顯金鑰（如「key … not exist」）：report 一進來就遮罩成唯一版本，
+            # 之後 SESSION／/api/job／/api/summary 拿到的都是這份，不會有沒遮的副本。
+            job.report = [
+                {**item, "reason": _redact_text(str(item.get("reason", "")), job.secrets)}
+                for item in raw_report
+            ]
         with _lock:
             for item in job.report:
                 record(item["name"], item["status"], item.get("reason", ""))
@@ -482,6 +489,11 @@ def api_env(body: EnvIn) -> dict[str, Any]:
     with _lock:
         if _job and _job.running:
             raise HTTPException(409, "測試進行中，請等它結束再改設定")
+        for v in (body.api_key, body.sec_key, body.ca_passwd, body.ca_path):
+            # 用 splitlines 的同一套判準：CR／LF 之外，U+2028／U+2029／NEL／VT／FF 也算分行，
+            # 否則能在 .env 注入第二個鍵（ca_path 不受金鑰鎖定保護）
+            if "".join(v.splitlines()) != v:
+                raise HTTPException(400, "值不可含換行（會破壞 .env 格式）")
         updates: dict[str, str] = {}
         if (body.api_key.strip() or body.sec_key.strip()) and keys_verified() and not body.unlock_keys:
             raise HTTPException(409, "API Key／Secret Key 已驗證通過並鎖定；要更換請先按「解鎖修改」")
@@ -549,7 +561,7 @@ def api_browse() -> dict[str, Any]:
     global _dialog_proc
     try:
         proc = subprocess.Popen(
-            ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", ps],
+            [str(_POWERSHELL), "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", ps],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -681,10 +693,41 @@ def _secret_values() -> set[str]:
 
 
 def _redact_text(text: str, secrets: set[str] | list[str]) -> str:
-    """把給定的秘密值全部換成 [已遮罩]（長的先換，避免短值是長值的子字串），身分證字號中段打碼。"""
-    for s in sorted(set(secrets), key=len, reverse=True):
-        text = text.replace(s, "[已遮罩]")
-    return _PERSON_ID_RE.sub(r"\1*****\2", text)
+    """秘密值整段換成 [已遮罩]，身分證字號中段打碼；兩者在原文上用區間計算、不互相破壞。
+
+    不能用「先換 A 再換 B」的兩趟 replace：短密碼（如 1234）是身分證的子字串時，先換密碼會把
+    身分證切成 ``A[已遮罩]56789`` 讓 regex 對不上；反過來先遮身分證，含身分證片段的密碼
+    （``pw-A123456789-x``）就對不上而露出前後段。所以在原文上找出所有秘密區間與身分證區間，
+    排序後取聯集：只要一段裡碰到任何秘密就整段 [已遮罩]，純身分證的段才打碼中段。
+
+    複雜度 O(總命中數 log)：每個秘密用 ``str.find`` 跳著找（不逐字元退回），匯出幾百 KB 的
+    log 也不會退化成平方時間。"""
+    SECRET, PID = 1, 0
+    spans: list[tuple[int, int, int]] = []  # (start, end, kind)
+    for s in {x for x in secrets if x}:
+        start = 0
+        while (i := text.find(s, start)) != -1:
+            start = i + len(s)
+            spans.append((i, start, SECRET))
+    for m in _PERSON_ID_RE.finditer(text):
+        spans.append((m.start(), m.end(), PID))
+    if not spans:
+        return text
+    spans.sort()
+    out: list[str] = []
+    pos = 0
+    cs, ce, ck = spans[0]
+    for i, j, k in [*spans[1:], (len(text) + 1, len(text) + 1, PID)]:  # 哨兵：把最後一段也吐出來
+        if i < ce:  # 重疊（含相鄰不算）：併成一段，秘密優先
+            ce = max(ce, j)
+            ck = max(ck, k)
+            continue
+        out.append(text[pos:cs])
+        out.append("[已遮罩]" if ck == SECRET else f"{text[cs : cs + 3]}*****{text[ce - 2 : ce]}")
+        pos = ce
+        cs, ce, ck = i, j, k
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _redact(text: str) -> str:
