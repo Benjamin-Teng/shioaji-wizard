@@ -263,6 +263,21 @@ def find_eleader_pfx(base: Path = EKEY_BASE) -> list[str]:
         return []
 
 
+def auto_adopt_eleader_pfx(env: dict[str, Any], candidates: list[str]) -> bool:
+    """目前憑證失效且只有一個 eLeader 候選時，安全地寫入該路徑。"""
+    if env.get("decode_error") or env.get("pfx_exists") or len(candidates) != 1:
+        return False
+    candidate = Path(candidates[0])
+    if not candidate.is_file():
+        return False
+    try:
+        write_env_values({"SJ_CA_PATH": candidate.resolve().as_posix()})
+    except OSError:
+        return False
+    _STALE_FIELDS.add("path")
+    return True
+
+
 def cloud_sync_tag() -> str:
     low = str(ROOT).lower()
     for tag in ("onedrive", "dropbox", "google drive", "googledrive", "icloud"):
@@ -468,7 +483,11 @@ def favicon() -> FileResponse:
 @app.get("/api/state")
 def api_state() -> dict[str, Any]:
     with _lock:
+        candidates = find_eleader_pfx()
         env = inspect_env()
+        auto_adopted = auto_adopt_eleader_pfx(env, candidates)
+        if auto_adopted:
+            env = inspect_env()
         return {
             "root": str(ROOT),
             "env_path": str(ENV_PATH),
@@ -480,7 +499,8 @@ def api_state() -> dict[str, Any]:
             "version": APP_VERSION,
             "stale": sorted(_STALE_FIELDS),
             "keys_locked": keys_verified(),
-            "pfx_candidates": find_eleader_pfx(),
+            "pfx_candidates": candidates,
+            "pfx_auto_adopted": auto_adopted,
         }
 
 

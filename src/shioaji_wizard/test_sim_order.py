@@ -15,6 +15,13 @@ import sys
 import time
 import warnings
 
+from shioaji_wizard.diagnostics import (
+    explain_feature_error,
+    explain_order_error,
+    is_ip_allowlist_error,
+    missing_account_reason,
+)
+from shioaji_wizard.diagnostics import explain_login_error as _explain_login_error
 from shioaji_wizard.sjenv import ENV_PATH, Report, load_env, print_summary
 
 A_LOGIN = "A1 模擬環境登入"
@@ -25,17 +32,7 @@ A_FUT_ORDER = "A5 期貨模擬下單"
 
 
 def explain_login_error(e: Exception) -> str:
-    msg = f"{type(e).__name__}: {e}"
-    low = msg.lower()
-    if "not exist" in low or "api_key" in low or "key:" in low:
-        return f"API Key 不存在或打錯（請到 API 管理頁確認／重建）— 伺服器：{msg[:160]}"
-    if "secret" in low or "signature" in low or "sign" in low:
-        return f"Secret Key 錯誤（與 API Key 不成對）— 伺服器：{msg[:160]}"
-    if "expire" in low:
-        return f"API Key 已過期，請到 API 管理頁重新建立 — 伺服器：{msg[:160]}"
-    if "permission" in low or "forbidden" in low or "403" in low:
-        return f"API Key 權限不足（建立時要勾「行情/資料」）— 伺服器：{msg[:160]}"
-    return f"登入失敗（網路、金鑰或權限問題）— 伺服器：{msg[:200]}"
+    return _explain_login_error(e, production=False)
 
 
 def get_contract(api, kind: str, code: str):
@@ -52,6 +49,9 @@ def get_contract(api, kind: str, code: str):
             api.fetch_contracts(contract_download=True)
             c = book[code]
         except Exception as e:  # noqa: BLE001 — 小白工具：任何失敗都要化成可讀原因
+            diagnostic = explain_feature_error(e, feature="行情/資料")
+            if diagnostic:
+                return None, diagnostic
             return (
                 None,
                 f"合約資料載入失敗（{type(e).__name__}: {str(e)[:120]}），請確認網路後重試",
@@ -63,15 +63,14 @@ def get_contract(api, kind: str, code: str):
     return c, ""
 
 
-def order_reason(trade, sj) -> str:
+def order_reason(trade, sj, *, product: str = "該商品") -> str:
     status = trade.status.status
     msg = getattr(trade.status, "msg", "") or ""
     if status in (sj.OrderStatus.PendingSubmit, sj.OrderStatus.Submitted):
         return ""
-    hints = (
-        "常見原因：API Key 建立時沒勾「交易」；不在測試時段（週一～五 08:00–20:00）；該商品 API 約定書未簽署"
-    )
-    return f"狀態 {status}" + (f"，伺服器訊息：{msg}" if msg else "") + f"；{hints}"
+    reason = explain_order_error(msg or f"狀態 {status}", product=product)
+    detail = "" if is_ip_allowlist_error(msg) else (f"，伺服器訊息：{msg}" if msg else "")
+    return f"狀態 {status}{detail}；{reason}"
 
 
 def main() -> int:
@@ -120,7 +119,7 @@ def main() -> int:
         if api.stock_account is None:
             rep.fail(
                 A_STOCK_ACC,
-                "這組 API Key 底下沒有證券帳戶（未開證券戶，或 API Key 建立時沒勾選該帳戶）",
+                missing_account_reason("證券"),
             )
             rep.skip(A_STOCK_ORDER, "沒有證券帳戶")
         else:
@@ -145,7 +144,7 @@ def main() -> int:
                             account=api.stock_account,
                         ),
                     )
-                    why = order_reason(st, sj)
+                    why = order_reason(st, sj, product="證券")
                     if why:
                         rep.fail(A_STOCK_ORDER, why)
                     else:
@@ -153,7 +152,7 @@ def main() -> int:
                 except Exception as e:  # noqa: BLE001
                     rep.fail(
                         A_STOCK_ORDER,
-                        f"下單呼叫失敗（{type(e).__name__}: {str(e)[:160]}）；常見原因：API Key 沒勾「交易」、證券 API 約定書未簽署",
+                        explain_order_error(e, product="證券"),
                     )
 
         # ---- 期貨：近月台指 TXFR1，僅在明示 --futures 時才測 ----
@@ -162,7 +161,7 @@ def main() -> int:
             if api.futopt_account is None:
                 rep.fail(
                     A_FUT_ACC,
-                    "這組 API Key 底下沒有期貨帳戶（未開期貨戶、或 API Key 建立時沒勾選期貨帳戶）；只做證券可忽略",
+                    f"{missing_account_reason('期貨')}；只做證券可忽略",
                 )
                 rep.skip(A_FUT_ORDER, "沒有期貨帳戶")
             else:
@@ -187,7 +186,7 @@ def main() -> int:
                                 account=api.futopt_account,
                             ),
                         )
-                        why = order_reason(ft, sj)
+                        why = order_reason(ft, sj, product="期貨")
                         if why:
                             rep.fail(A_FUT_ORDER, why)
                         else:
@@ -198,7 +197,7 @@ def main() -> int:
                     except Exception as e:  # noqa: BLE001
                         rep.fail(
                             A_FUT_ORDER,
-                            f"下單呼叫失敗（{type(e).__name__}: {str(e)[:160]}）；常見原因：期貨 API 約定書未簽署、API Key 沒勾「交易」",
+                            explain_order_error(e, product="期貨"),
                         )
         else:
             rep.skip(A_FUT_ACC, "未要求測期貨（只做證券可忽略；要測請按「也測期貨／選擇權」）")

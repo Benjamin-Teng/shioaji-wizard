@@ -27,8 +27,9 @@ def env_mods(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def client(env_mods):
+def client(env_mods, monkeypatch: pytest.MonkeyPatch):
     _, server = env_mods
+    monkeypatch.setattr(server, "find_eleader_pfx", lambda: [])
     return TestClient(server.app, base_url="http://127.0.0.1")  # guards 只放行本機 Host
 
 
@@ -356,6 +357,95 @@ def test_find_eleader_pfx(env_mods, tmp_path: Path, monkeypatch: pytest.MonkeyPa
     found = server.find_eleader_pfx(base)
     assert found == [str(base / "A123456789" / "S" / "Sinopac.pfx")]
     assert server.find_eleader_pfx(tmp_path / "nope") == []
+
+
+def test_state_auto_adopts_only_eleader_pfx_when_current_path_missing(
+    env_mods, client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sjenv, server = env_mods
+    client.post("/api/env", json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_path": ""})
+    candidate = tmp_path / "ekey" / "551" / "A123456789" / "S" / "Sinopac.pfx"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_bytes(b"pfx")
+    monkeypatch.setattr(server, "find_eleader_pfx", lambda: [str(candidate)])
+    server._STALE_FIELDS.clear()
+
+    state = client.get("/api/state").json()
+    values, _ = sjenv.parse_env_text(sjenv.ENV_PATH.read_text(encoding="utf-8"))
+
+    assert Path(values["SJ_CA_PATH"]) == candidate
+    assert state["env"]["pfx_exists"] is True
+    assert Path(state["env"]["pfx_resolved"]) == candidate
+    assert state["pfx_auto_adopted"] is True
+    assert state["stale"] == ["path"]
+
+
+def test_state_does_not_guess_between_multiple_eleader_pfx(
+    env_mods, client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sjenv, server = env_mods
+    client.post("/api/env", json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_path": ""})
+    candidates = []
+    for person_id in ("A123456789", "B223456789"):
+        candidate = tmp_path / "ekey" / "551" / person_id / "S" / "Sinopac.pfx"
+        candidate.parent.mkdir(parents=True)
+        candidate.write_bytes(b"pfx")
+        candidates.append(str(candidate))
+    monkeypatch.setattr(server, "find_eleader_pfx", lambda: candidates)
+
+    state = client.get("/api/state").json()
+    values, _ = sjenv.parse_env_text(sjenv.ENV_PATH.read_text(encoding="utf-8"))
+
+    assert Path(values["SJ_CA_PATH"]) == sjenv.DEFAULT_PFX
+    assert state["env"]["pfx_exists"] is False
+    assert state["pfx_auto_adopted"] is False
+    assert state["pfx_candidates"] == candidates
+
+
+def test_state_preserves_valid_configured_pfx_over_eleader_candidate(
+    env_mods, client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sjenv, server = env_mods
+    configured = tmp_path / "certs" / "configured.pfx"
+    configured.parent.mkdir()
+    configured.write_bytes(b"configured")
+    candidate = tmp_path / "ekey" / "551" / "A123456789" / "S" / "Sinopac.pfx"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_bytes(b"candidate")
+    client.post(
+        "/api/env",
+        json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_path": str(configured)},
+    )
+    monkeypatch.setattr(server, "find_eleader_pfx", lambda: [str(candidate)])
+
+    state = client.get("/api/state").json()
+    values, _ = sjenv.parse_env_text(sjenv.ENV_PATH.read_text(encoding="utf-8"))
+
+    assert Path(values["SJ_CA_PATH"]) == configured
+    assert Path(state["env"]["pfx_resolved"]) == configured
+    assert state["pfx_auto_adopted"] is False
+
+
+def test_state_replaces_broken_configured_pfx_with_only_eleader_candidate(
+    env_mods, client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sjenv, server = env_mods
+    broken = tmp_path / "certs" / "missing.pfx"
+    candidate = tmp_path / "ekey" / "551" / "A123456789" / "S" / "Sinopac.pfx"
+    candidate.parent.mkdir(parents=True)
+    candidate.write_bytes(b"candidate")
+    client.post(
+        "/api/env",
+        json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_path": str(broken)},
+    )
+    monkeypatch.setattr(server, "find_eleader_pfx", lambda: [str(candidate)])
+
+    state = client.get("/api/state").json()
+    values, _ = sjenv.parse_env_text(sjenv.ENV_PATH.read_text(encoding="utf-8"))
+
+    assert Path(values["SJ_CA_PATH"]) == candidate
+    assert Path(state["env"]["pfx_resolved"]) == candidate
+    assert state["pfx_auto_adopted"] is True
 
 
 def test_report_reason_redacted_before_session(

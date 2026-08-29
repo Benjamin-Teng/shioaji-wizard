@@ -13,7 +13,9 @@ import sys
 import warnings
 from datetime import datetime
 
-from shioaji_wizard.sjenv import ENV_PATH, Report, load_env, pfx_path, print_summary
+from shioaji_wizard.diagnostics import explain_login_error as _explain_login_error
+from shioaji_wizard.diagnostics import missing_account_reason
+from shioaji_wizard.sjenv import ENV_PATH, FAIL, PASS, Report, load_env, pfx_path, print_summary
 
 B_LOGIN = "B1 正式環境登入"
 B_STOCK_SIGNED = "B2 證券 API 簽署＋模擬測試審核（signed）"
@@ -42,17 +44,7 @@ def acct_type(acc) -> str:
 
 
 def explain_login_error(e: Exception) -> str:
-    msg = f"{type(e).__name__}: {e}"
-    low = msg.lower()
-    if "not exist" in low or "key:" in low:
-        return f"API Key 不存在或打錯 — 伺服器：{msg[:160]}"
-    if "secret" in low or "signature" in low:
-        return f"Secret Key 錯誤（與 API Key 不成對）— 伺服器：{msg[:160]}"
-    if "expire" in low:
-        return f"API Key 已過期 — 伺服器：{msg[:160]}"
-    if "permission" in low or "forbidden" in low or "403" in low or "production" in low:
-        return f"API Key 建立時沒勾「正式環境」（或權限不足）— 伺服器：{msg[:160]}"
-    return f"正式環境登入失敗（可能 API Key 沒勾「正式環境」、金鑰錯誤或網路問題）— 伺服器：{msg[:200]}"
+    return _explain_login_error(e, production=True)
 
 
 def explain_ca_error(e: Exception) -> str:
@@ -66,6 +58,39 @@ def explain_ca_error(e: Exception) -> str:
     if "expire" in low or "過期" in low:
         return f"憑證已過期，請到 API 管理頁重新下載 — {msg[:120]}"
     return f"憑證啟用失敗（{name}: {msg[:160]}）；可能憑證與此帳號不符、已過期或檔案損毀，請到 API 管理頁重新下載"
+
+
+def record_signing_results(rep: Report, accounts: list, *, want_futures: bool) -> None:
+    """記錄證券／期貨 signed 狀態；證券是本流程必要帳戶。"""
+    stock_accs = [a for a in accounts if acct_type(a) == "S"]
+    fut_accs = [a for a in accounts if acct_type(a) == "F"]
+    if not stock_accs:
+        rep.fail(B_STOCK_SIGNED, missing_account_reason("證券"))
+    elif all(a.signed for a in stock_accs):
+        rep.ok(B_STOCK_SIGNED)
+    else:
+        rep.fail(B_STOCK_SIGNED, NOT_SIGNED_STOCK)
+    if not want_futures:
+        rep.skip(B_FUT_SIGNED, "未要求測期貨（只做證券可忽略；要測請按「也測期貨／選擇權」）")
+    elif not fut_accs:
+        rep.fail(B_FUT_SIGNED, f"{missing_account_reason('期貨')}；只做證券請不要勾期貨")
+    elif all(a.signed for a in fut_accs):
+        rep.ok(B_FUT_SIGNED)
+    else:
+        rep.fail(B_FUT_SIGNED, NOT_SIGNED_FUT)
+
+
+def classify_ca_expirations(expirations: list[datetime], now: datetime) -> tuple[str, str]:
+    """以所有帳戶中最早到期的憑證判定結果。"""
+    if not expirations:
+        return FAIL, "帳戶沒有 person_id，無法查詢憑證到期日"
+    earliest = min(expirations)
+    left = (earliest - now).days
+    if earliest < now:
+        return FAIL, f"憑證已於 {earliest:%Y-%m-%d} 過期，請到 API 管理頁重新下載"
+    if left < 30:
+        return PASS, f"憑證 {left} 天後（{earliest:%Y-%m-%d}）到期，建議儘早到 API 管理頁重新下載"
+    return PASS, ""
 
 
 def main() -> int:
@@ -111,27 +136,9 @@ def main() -> int:
         rep.ok(B_LOGIN, f"{len(accounts)} 個帳戶")
 
         # ---- signed：證券／期貨各自判斷 ----
-        stock_accs = [a for a in accounts if acct_type(a) == "S"]
-        fut_accs = [a for a in accounts if acct_type(a) == "F"]
         for acc in accounts:
             print(f"      {acc.account_type} {acc.broker_id}-{acc.account_id} signed={acc.signed}")
-        if not stock_accs:
-            rep.skip(B_STOCK_SIGNED, "沒有證券帳戶")
-        elif all(a.signed for a in stock_accs):
-            rep.ok(B_STOCK_SIGNED)
-        else:
-            rep.fail(B_STOCK_SIGNED, NOT_SIGNED_STOCK)
-        if not want_futures:
-            rep.skip(B_FUT_SIGNED, "未要求測期貨（只做證券可忽略；要測請按「也測期貨／選擇權」）")
-        elif not fut_accs:
-            rep.fail(
-                B_FUT_SIGNED,
-                "這組 API Key 底下沒有期貨帳戶（未開期貨戶、或建 API Key 時沒勾選期貨帳戶）；只做證券請不要勾期貨",
-            )
-        elif all(a.signed for a in fut_accs):
-            rep.ok(B_FUT_SIGNED)
-        else:
-            rep.fail(B_FUT_SIGNED, NOT_SIGNED_FUT)
+        record_signing_results(rep, accounts, want_futures=want_futures)
 
         # ---- 憑證檔 ----
         ca_path = pfx_path(env)
@@ -171,9 +178,10 @@ def main() -> int:
         # ---- 到期日 ----
         pids = sorted({a.person_id for a in api.list_accounts() if a.person_id})
         if not pids:
-            rep.skip(B_EXPIRE, "帳戶沒有 person_id，無法查詢")
+            _status, reason = classify_ca_expirations([], datetime.now())
+            rep.fail(B_EXPIRE, reason)
         else:
-            worst = None
+            expirations = []
             for pid in pids:
                 try:
                     exp: datetime = api.get_ca_expiretime(person_id=pid)
@@ -182,21 +190,16 @@ def main() -> int:
                         B_EXPIRE,
                         f"查詢到期日失敗（{type(e).__name__}: {str(e)[:120]}）",
                     )
-                    worst = "err"
                     break
                 left = (exp - datetime.now(exp.tzinfo)).days
                 print(f"      person_id={pid} 憑證到期 {exp:%Y-%m-%d %H:%M}（剩 {left} 天）")
-                if left < 0:
-                    worst = f"憑證已於 {exp:%Y-%m-%d} 過期，請到 API 管理頁重新下載"
-                elif worst is None and left < 30:
-                    worst = f"憑證 {left} 天後（{exp:%Y-%m-%d}）到期，建議儘早到 API 管理頁重新下載"
-            if worst is None:
-                rep.ok(B_EXPIRE)
-            elif worst != "err":
-                if "已於" in worst:
-                    rep.fail(B_EXPIRE, worst)
+                expirations.append(exp)
+            if expirations and len(expirations) == len(pids):
+                status, reason = classify_ca_expirations(expirations, datetime.now(expirations[0].tzinfo))
+                if status == FAIL:
+                    rep.fail(B_EXPIRE, reason)
                 else:
-                    rep.ok(B_EXPIRE, worst)
+                    rep.ok(B_EXPIRE, reason)
         return 0 if rep.all_passed else 1
     finally:
         if logged_in:

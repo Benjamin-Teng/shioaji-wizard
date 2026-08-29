@@ -272,7 +272,7 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const S = { running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, lastStatus:{} };
+  const S = { running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, windowWarnings:[], lastStatus:{} };
   const MARK = {PASS:"✓ 通過", FAIL:"✗ 未通過", SKIP:"－ 未測"};
 
   const api = async (path, opts={}) => {
@@ -411,6 +411,7 @@
     if (document.activeElement !== $("caPath")) $("caPath").value = e.ca_path_custom ? (e.ca_path || "") : "";
     $("caPath").placeholder = e.pfx_exists && !e.ca_path_custom ? "已找到同資料夾的 Sinopac.pfx（留空即可）" : "留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔";
     $("pfxState").innerHTML = e.pfx_exists ? '<span class="stamp PASS">找到憑證</span>' : '<span class="stamp FAIL">找不到</span>';
+    if (st.pfx_auto_adopted) $("saveMsg").textContent = "已自動帶入唯一的 eLeader 憑證路徑並儲存";
     const li = [];
     if (e.decode_error){ li.push(['bad', '.env 不是 UTF-8 編碼，讀不出來。重新填入金鑰按「儲存設定」會覆寫它；或刪掉 .env 再重開。']); }
     else {
@@ -442,7 +443,8 @@
       const w = await api("/api/window");
       $("winA").innerHTML = `現在台灣時間 ${esc(w.now)}（週${esc(w.weekday)}）\n` + w.notes.map(n => `<span class="${n.startsWith("⚠")?"w":"g"}">${esc(n)}</span>`).join("\n");
       S.windowGood = !!w.good;
-    } catch (err){ $("winA").textContent = "時段檢查失敗：" + err.message; S.windowGood = true; }
+      S.windowWarnings = (w.notes || []).filter(n => n.startsWith("⚠"));
+    } catch (err){ $("winA").textContent = "時段檢查失敗：" + err.message; S.windowGood = true; S.windowWarnings = []; }
   }
   function startPoll(){
     if (S.pollTimer) return;
@@ -465,7 +467,7 @@
   async function run(kind){
     if (kind === "a"){
       await checkWindow();
-      if (!S.windowGood && !confirm("現在不在永豐的測試時段（或 IP 不在台灣），送出的測試單很可能不被採計。\n仍要現在送出嗎？")) return;
+      if (!S.windowGood && !confirm(`${S.windowWarnings.join("\n")}\n\n這是模擬測試服務的時段／18:00–20:00 台灣 IP 限制，與 API Key 自己設定的 IP 白名單不同。\n仍要現在送出嗎？`)) return;
     }
     if (kind === "b" && !confirm("即將以正式環境登入並啟用憑證（只查詢、不下單）。繼續？")) return;
     try {
