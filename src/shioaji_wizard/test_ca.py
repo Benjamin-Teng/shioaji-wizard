@@ -19,7 +19,7 @@ import contextlib
 import re
 import sys
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from shioaji_wizard import certinfo
@@ -96,17 +96,34 @@ def record_signing_results(rep: Report, accounts: list, *, want_futures: bool) -
         rep.fail(B_FUT_SIGNED, NOT_SIGNED_FUT)
 
 
+_TW_TZ = timezone(timedelta(hours=8))
+
+
+def tw_date(dt: datetime) -> str:
+    """到期日一律以台灣時間的日期顯示：離線讀到的是 UTC，直接印會比使用者在永豐
+    網頁看到的日期早一天（台灣時間 00:00–08:00 之間到期的憑證）。naive（shioaji 線上
+    查回來的本地時間）原樣顯示。"""
+    return f"{as_tw(dt):%Y-%m-%d}"
+
+
+def as_tw(dt: datetime) -> datetime:
+    """統一成台灣時間的 aware datetime：aware 換算、naive 視為台灣本地時間。比較與相減前
+    一律先過這裡，aware／naive 混用才不會 TypeError。"""
+    return dt.replace(tzinfo=_TW_TZ) if dt.tzinfo is None else dt.astimezone(_TW_TZ)
+
+
 def classify_ca_expirations(expirations: list[datetime], now: datetime) -> tuple[str, str]:
-    """以所有帳戶中最早到期的憑證判定結果。"""
+    """以所有帳戶中最早到期的憑證判定結果；通過時也在說明列出到期日與剩餘天數。"""
     if not expirations:
         return FAIL, "帳戶沒有 person_id，無法查詢憑證到期日"
-    earliest = min(expirations)
+    earliest = min(as_tw(e) for e in expirations)
+    now = as_tw(now)
     left = (earliest - now).days
     if earliest < now:
-        return FAIL, f"憑證已於 {earliest:%Y-%m-%d} 過期，請到 API 管理頁重新下載"
+        return FAIL, f"憑證已於 {tw_date(earliest)} 過期，請到 API 管理頁重新下載"
     if left < 30:
-        return PASS, f"憑證 {left} 天後（{earliest:%Y-%m-%d}）到期，建議儘早到 API 管理頁重新下載"
-    return PASS, ""
+        return PASS, f"憑證 {left} 天後（{tw_date(earliest)}）到期，建議儘早到 API 管理頁重新下載"
+    return PASS, f"到期日 {tw_date(earliest)}（剩 {left} 天）"
 
 
 def mask_taiwan_id(id_no: str) -> str:
@@ -139,7 +156,7 @@ def build_offline_diagnostic(cert: certinfo.CertInfo, person_ids: set[str]) -> s
     """B5（activate_ca）失敗時的補充診斷：離線讀到的到期日，加上身分不符提示
     （偵測得到才附）。不連線，純函式方便測試。"""
     parts = [
-        f"憑證檔與密碼本身可正常讀取、到期日 {cert.not_after:%Y-%m-%d}，"
+        f"憑證檔與密碼本身可正常讀取、到期日 {tw_date(cert.not_after)}，"
         "請確認這張憑證與這組 API Key 是同一人的"
     ]
     mismatch = cert_subject_mismatch_reason(cert.subject, person_ids)
@@ -306,13 +323,14 @@ def main() -> int:
                         )
                         failed = True
                         break
-                    left = (exp - datetime.now(exp.tzinfo)).days
+                    exp = as_tw(exp)
+                    left = (exp - datetime.now(_TW_TZ)).days
                     print(
                         f"      person_id={mask_taiwan_id(pid)} 憑證到期 {exp:%Y-%m-%d %H:%M}（剩 {left} 天）"
                     )
                     expirations.append(exp)
                 if not failed and expirations:
-                    status, reason = classify_ca_expirations(expirations, datetime.now(expirations[0].tzinfo))
+                    status, reason = classify_ca_expirations(expirations, datetime.now(_TW_TZ))
                     (rep.fail if status == FAIL else rep.ok)(B_EXPIRE, reason)
         return 0 if rep.all_passed else 1
     finally:

@@ -175,7 +175,27 @@ def test_ca_expiry_classification_does_not_warn_at_exactly_30_days():
     status, reason = test_ca.classify_ca_expirations([now + timedelta(days=30)], now)
 
     assert status == "PASS"
-    assert reason == ""
+    assert "建議" not in reason  # 剛好 30 天：不提醒
+    assert reason == "到期日 2026-09-28（剩 30 天）"  # 但通過也要列出到期日
+
+
+def test_ca_expiry_passing_reason_lists_date_and_days_left():
+    now = datetime(2026, 9, 20, 12, tzinfo=UTC)
+
+    status, reason = test_ca.classify_ca_expirations([datetime(2028, 8, 22, 4, tzinfo=UTC)], now)
+
+    assert status == "PASS"
+    assert reason == "到期日 2028-08-22（剩 701 天）"
+
+
+def test_ca_expiry_date_is_shown_in_taiwan_time_not_utc():
+    """台灣時間 2028-08-22 07:00 到期＝UTC 08-21 23:00：要顯示 08-22，和永豐網頁一致。"""
+    utc_expiry = datetime(2028, 8, 21, 23, 0, tzinfo=UTC)
+
+    assert test_ca.tw_date(utc_expiry) == "2028-08-22"
+    assert test_ca.tw_date(datetime(2028, 8, 22, 7, 0)) == "2028-08-22"  # naive：原樣
+    _status, reason = test_ca.classify_ca_expirations([utc_expiry], datetime(2028, 8, 22, 0, tzinfo=UTC))
+    assert "2028-08-22" in reason and "過期" in reason
 
 
 def test_ca_expiry_classification_fails_when_already_expired():
@@ -421,3 +441,17 @@ def test_a_main_records_all_five_items_once_on_every_early_exit(monkeypatch, fai
     status = {item["name"]: item["status"] for item in recorded[0].items}
     assert status[test_sim_order.A_LOGIN] == "FAIL"
     assert all(status[n] == "SKIP" for n in _ALL_A[1:])
+
+
+@pytest.mark.parametrize("order", ["aware_first", "naive_first"])
+def test_ca_expiry_classification_handles_mixed_aware_and_naive(order):
+    """線上查回來的到期日若 aware／naive 混用，不可 TypeError；naive 視為台灣本地時間。"""
+    aware = datetime(2028, 8, 21, 23, 0, tzinfo=UTC)  # ＝台灣 2028-08-22 07:00
+    naive = datetime(2028, 8, 22, 6, 0)  # 台灣本地 06:00，比上面早一小時
+    exps = [aware, naive] if order == "aware_first" else [naive, aware]
+
+    status, reason = test_ca.classify_ca_expirations(exps, datetime(2026, 9, 20, 12, 0))
+
+    assert status == "PASS"
+    assert reason.startswith("到期日 2028-08-22（剩 ")
+    assert test_ca.as_tw(naive) < test_ca.as_tw(aware)
