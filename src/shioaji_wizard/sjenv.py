@@ -1,19 +1,30 @@
-"""共用：定位根目錄（放 .env、Sinopac.pfx 的地方）、讀取 .env、測試結果回報。
+"""共用：定位根目錄（放 Sinopac.pfx 預設位置的地方）、讀取 .env、測試結果回報。
 
 根目錄 = 環境變數 SJ_ENV_DIR；沒有就取目前工作目錄。
+
+多帳號：.env 實際落在「目前 profile 目錄」（PROFILE_DIR），預設就是 ROOT（單一
+帳號／舊行為）；server.py 支援切換到 eLeader 憑證資料夾（``C:\\ekey\\551\\<身分證
+字號>\\S``）時，會把 SJ_PROFILE_DIR 設給跑 test_ca／test_sim_order 的子行程，
+這兩支腳本因此不用改，直接沿用 ENV_PATH。ROOT／RUNTIME／DEFAULT_PFX／
+``pfx_path()`` 的相對路徑基準一律維持綁 app ROOT，不隨 profile 走
+（``.runtime`` 絕不可能建到 ekey 資料夾裡）。
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parent
-# 根目錄（放 .env／Sinopac.pfx）：一律由啟動端用 SJ_ENV_DIR 指定（桌面殼＝程式所在資料夾）；
-# 沒設就用目前工作目錄（開發時在專案根目錄跑）。
+# 根目錄（app 本體所在，Sinopac.pfx 預設位置、.runtime 都綁這裡）：一律由啟動端用
+# SJ_ENV_DIR 指定（桌面殼＝程式所在資料夾）；沒設就用目前工作目錄（開發時在專案根目錄跑）。
 ROOT = Path(os.environ.get("SJ_ENV_DIR") or Path.cwd()).resolve()
-ENV_PATH = ROOT / ".env"
+# 目前 profile 目錄（.env 實際所在）：子行程由 SJ_PROFILE_DIR 指定；沒設就是 ROOT。
+# 伺服器行程本身的「目前 profile」是可變狀態，由 server.py 自行維護，不讀這個常數。
+PROFILE_DIR = Path(os.environ.get("SJ_PROFILE_DIR") or ROOT).resolve()
+ENV_PATH = PROFILE_DIR / ".env"
 DEFAULT_PFX = ROOT / "Sinopac.pfx"
 # 內部檔案（app.log、shioaji.log、.app-ready、.app-status）全放這個隱藏子資料夾，
 # 使用者看到的根層只有 wizard.exe／.env／Sinopac.pfx／匯出的 .log。
@@ -53,6 +64,23 @@ _MARK = {PASS: "✓ 通過", FAIL: "✗ 未通過", SKIP: "－ 未測"}
 
 
 # ---------------------------------------------------------------- .env
+def atomic_write_text(path: Path, text: str) -> None:
+    """同目錄暫存檔＋os.replace 原子替換：寫到一半失敗（磁碟滿、防毒攔截、權限）時原檔
+    一個位元組都不會變——.env 裡是金鑰，不能被截斷成半個檔。**所有 .env 寫入都走這裡。**
+    換行沿用文字模式預設（Windows＝CRLF，記事本好讀），與舊版 ``write_text`` 一致。"""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
 def parse_env_text(text: str) -> tuple[dict[str, str], list[str]]:
     """回傳 (鍵值, 格式問題清單)。值會去掉首尾空白與成對引號。"""
     values: dict[str, str] = {}
@@ -108,7 +136,7 @@ def ensure_env_keys(path: Path, defaults: dict[str, str]) -> list[str]:
             added.append(k)
     if added:
         sep = "" if (not text or text.endswith("\n")) else "\n"
-        path.write_text(text + sep + "\n".join(lines) + "\n", encoding="utf-8")
+        atomic_write_text(path, text + sep + "\n".join(lines) + "\n")
     return added
 
 

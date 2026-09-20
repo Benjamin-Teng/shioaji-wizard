@@ -73,6 +73,14 @@ def order_reason(trade, sj, *, product: str = "該商品") -> str:
     return f"狀態 {status}{detail}；{reason}"
 
 
+def _skip_after_login_failure(rep: Report, *, want_futures: bool, reason: str) -> None:
+    """A1 沒過時 A2–A5 一律補 SKIP：檢核單固定五列，不能因為早退就少列。"""
+    for n in (A_STOCK_ACC, A_STOCK_ORDER):
+        rep.skip(n, reason)
+    for n in (A_FUT_ACC, A_FUT_ORDER):
+        rep.skip(n, reason if want_futures else "未要求測期貨")
+
+
 def main() -> int:
     warnings.simplefilter(
         "ignore", DeprecationWarning
@@ -82,6 +90,7 @@ def main() -> int:
     want_futures = "--futures" in sys.argv
     if not (env.get("SJ_API_KEY") and env.get("SJ_SEC_KEY")):
         rep.fail(A_LOGIN, f"{ENV_PATH} 缺少 SJ_API_KEY / SJ_SEC_KEY")
+        _skip_after_login_failure(rep, want_futures=want_futures, reason="前置（登入）未通過")
         print_summary(rep.items, "A 模擬測試結果")
         return 2
 
@@ -92,10 +101,17 @@ def main() -> int:
             A_LOGIN,
             f"shioaji 模組載入失敗（{type(e).__name__}: {str(e)[:120]}）；Windows 可能缺 Visual C++ 可轉散發套件，或環境損毀請刪除 .venv 重跑",
         )
+        _skip_after_login_failure(rep, want_futures=want_futures, reason="前置未通過")
         print_summary(rep.items, "A 模擬測試結果")
         return 2
 
-    api = sj.Shioaji(simulation=True)  # 模擬模式：這是硬性保險，不要改成 False
+    try:
+        api = sj.Shioaji(simulation=True)  # 模擬模式：這是硬性保險，不要改成 False
+    except Exception as e:  # noqa: BLE001
+        rep.fail(A_LOGIN, f"shioaji 初始化失敗（{type(e).__name__}: {str(e)[:120]}）")
+        _skip_after_login_failure(rep, want_futures=want_futures, reason="前置未通過")
+        print_summary(rep.items, "A 模擬測試結果")
+        return 2
     # shioaji 預設的委託回報 callback 會把整個 OrderState dict 印到輸出（對使用者是雜訊），接管掉
     with contextlib.suppress(Exception):
         api.set_order_callback(lambda *_a, **_k: None)
@@ -106,10 +122,7 @@ def main() -> int:
             logged_in = True
         except Exception as e:  # noqa: BLE001
             rep.fail(A_LOGIN, explain_login_error(e))
-            for n in (A_STOCK_ACC, A_STOCK_ORDER):
-                rep.skip(n, "前置（登入）未通過")
-            for n in (A_FUT_ACC, A_FUT_ORDER):
-                rep.skip(n, "前置（登入）未通過" if want_futures else "未要求測期貨")
+            _skip_after_login_failure(rep, want_futures=want_futures, reason="前置（登入）未通過")
             return 1
         rep.ok(A_LOGIN, f"{len(accounts)} 個帳戶")
         for acc in accounts:

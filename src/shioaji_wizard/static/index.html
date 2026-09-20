@@ -67,6 +67,9 @@
   .f label.failed{color:var(--seal)}
   .f label.saved{color:var(--pass)}
   .f .hint{grid-column:2;font-size:12px;color:var(--muted);line-height:1.5;margin-top:-2px}
+  #acctList{display:flex;flex-direction:column;gap:4px}
+  #acctList .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  #acctList code{font:12px var(--mono)}
   input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--rule-strong);border-radius:var(--r);font:13px var(--mono);background:#fff;color:var(--ink)}
   input::placeholder{color:#9AA6A3;font-family:var(--sans)}
   input.saved{border-color:var(--pass);background:#EAF5EF}
@@ -159,7 +162,7 @@
 
   <div class="grid2">
     <section class="card">
-      <h2>金鑰與憑證 <span class="tag">存成本資料夾的 .env；Shioaji Pro 與 shioaji server 讀同一份</span></h2>
+      <h2>金鑰與憑證 <span class="tag">存成 .env（位置見上方；eLeader 憑證會跟憑證放一起）；Shioaji Pro 與 shioaji server 可沿用</span></h2>
       <div class="f"><label for="apiKey"><span class="setmark" id="mkApi"></span>API Key</label><input type="text" id="apiKey" autocomplete="off" spellcheck="false"></div>
       <div class="f"><label for="secKey"><span class="setmark" id="mkSec"></span>Secret Key</label><div class="inline"><input type="password" id="secKey" autocomplete="new-password"><button type="button" class="unlock hidden" id="btnUnlock" title="金鑰已驗證通過並鎖定；只有要更換金鑰時才需要解鎖">解鎖修改</button></div></div>
       <div class="f"><span></span><div class="hint">到 <a href="#" data-open="https://www.sinotrade.com.tw/newweb/PythonAPIKey/">永豐金證券 API 管理頁</a> 建立。權限至少勾「行情/資料」＋「交易」；要正式下單再勾「正式環境」。Secret Key 只顯示一次。留空＝保留原值。</div></div>
@@ -167,7 +170,8 @@
         <div class="inline"><input type="password" id="caPwd" autocomplete="new-password"><label class="chk"><input type="checkbox" id="clearPwd"> 清除</label></div></div>
       <div class="f"><label for="caPath"><span class="setmark" id="mkPath"></span>憑證檔</label>
         <div class="inline"><input type="text" id="caPath" spellcheck="false" placeholder="留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔"><button id="btnBrowse">瀏覽…</button><span id="pfxState" style="white-space:nowrap"></span></div></div>
-      <div class="f"><span></span><div class="hint">同一頁按「下載憑證」取得 Sinopac.pfx；下載時設定的密碼就是憑證密碼。放在本資料夾就不用改路徑。只跑 A 可以先不填。<br>若你是用永豐 <b>eLeader</b> 申請的憑證，檔案預設在 <code>C:\ekey\551\(身分證字號)\S</code> 資料夾（只有安裝過 eLeader 的電腦才會有這個位置；憑證密碼舊預設為身分證字號）。<span id="ekeyHint"></span></div></div>
+      <div class="f"><span></span><div class="hint">同一頁按「下載憑證」取得 Sinopac.pfx；下載時設定的密碼就是憑證密碼。放在本資料夾就不用改路徑。只跑 A 可以先不填。<br>若你是用永豐 <b>eLeader</b> 申請的憑證，檔案預設在 <code>C:\ekey\551\(身分證字號)\S</code> 資料夾（只有安裝過 eLeader 的電腦才會有這個位置；憑證密碼舊預設為身分證字號）。</div></div>
+      <div class="f" id="acctRow"><label>帳號</label><div class="hint" id="acctList"></div></div>
       <div class="savebar"><button class="act" id="btnSave">儲存設定</button><span class="msg" id="saveMsg"></span></div>
       <ul class="problems" id="problems"></ul>
     </section>
@@ -209,7 +213,7 @@
   <div class="dh"><h2>使用說明</h2><button id="btnHelpClose">關閉</button></div>
   <div class="db">
     <h3>這個工具做什麼</h3>
-    <p>完成永豐 Shioaji API 開通必經的「模擬下單測試」，並確認正式環境的憑證可用。設定會存成本資料夾的 <code>.env</code>（<code>SJ_API_KEY</code>、<code>SJ_SEC_KEY</code>、<code>SJ_CA_PASSWD</code>、<code>SJ_CA_PATH</code>），和 Shioaji Pro／<code>shioaji server</code> 讀的是同一套名稱，之後可以直接沿用。</p>
+    <p>完成永豐 Shioaji API 開通必經的「模擬下單測試」，並確認正式環境的憑證可用。設定會存成 <code>.env</code>——一般在本資料夾；選用 eLeader 憑證（<code>C:\ekey\551\…\S</code>）時改存在那個憑證資料夾，畫面上方會顯示目前這份的位置（<code>SJ_API_KEY</code>、<code>SJ_SEC_KEY</code>、<code>SJ_CA_PASSWD</code>、<code>SJ_CA_PATH</code>），和 Shioaji Pro／<code>shioaji server</code> 讀的是同一套名稱，之後可以直接沿用。</p>
     <h3>先注意</h3>
     <ul>
       <li>不要把這個資料夾放在 OneDrive／Google Drive／Dropbox／iCloud 等會自動同步的地方——<code>.env</code>（金鑰、憑證密碼）與 <code>Sinopac.pfx</code>（憑證本體）會被上傳。</li>
@@ -219,7 +223,7 @@
     <h3>安全與免責聲明</h3>
     <ul>
       <li>本軟體為個人開發的開源工具，<b>非永豐金證券官方軟體</b>，與永豐金證券無任何隸屬或合作關係。</li>
-      <li><b>金鑰只在你的電腦與永豐官方 API 之間傳輸。</b>API Key／Secret Key／憑證密碼由你輸入後存在本資料夾的 <code>.env</code>；測試時由本機子行程讀取、交給永豐官方 shioaji SDK 以加密連線（HTTPS）連永豐伺服器。本軟體不會把金鑰、憑證或帳號資料送到永豐以外的伺服器，開發者也無從取得。唯一的第三方連線：週一～五 18:00–20:00（永豐限台灣 IP 的時段）開啟程式或執行 A 時，會向 <code>ipinfo.io</code> 查詢你的公網 IP 所屬國家、提醒你測試是否會被採計。ipinfo.io 因此會收到你的公網 IP（任何網路請求都會帶的資訊）並回傳 IP 與國家；這個請求不會送出 API 金鑰、憑證、密碼或帳號資料。</li>
+      <li><b>金鑰只在你的電腦與永豐官方 API 之間傳輸。</b>API Key／Secret Key／憑證密碼由你輸入後存在你電腦上的 <code>.env</code>（本資料夾；選用 eLeader 憑證時在該憑證資料夾）；測試時由本機子行程讀取、交給永豐官方 shioaji SDK 以加密連線（HTTPS）連永豐伺服器。本軟體不會把金鑰、憑證或帳號資料送到永豐以外的伺服器，開發者也無從取得。唯一的第三方連線：週一～五 18:00–20:00（永豐限台灣 IP 的時段）開啟程式或執行 A 時，會向 <code>ipinfo.io</code> 查詢你的公網 IP 所屬國家、提醒你測試是否會被採計。ipinfo.io 因此會收到你的公網 IP（任何網路請求都會帶的資訊）並回傳 IP 與國家；這個請求不會送出 API 金鑰、憑證、密碼或帳號資料。</li>
       <li><b>傳遞金鑰的唯一用途</b>是「模擬環境連線測試（A）」與「正式環境憑證連線測試（B）」：A 只在永豐模擬環境下單（不影響真實帳戶），B 只登入與查詢、不送出任何委託。</li>
       <li><b>金鑰與憑證由你自行保管。</b><code>.env</code> 與 <code>Sinopac.pfx</code> 是明文檔案，請勿分享、上傳或放進雲端同步資料夾；本軟體與開發者不負任何金鑰（token）／憑證保管責任。若不放心，測試完成後可到永豐 API 管理頁重新產生金鑰。</li>
       <li>本軟體按「現狀」提供，不提供任何明示或默示之擔保。因使用本軟體、金鑰或憑證外洩、帳戶操作、永豐服務或規則變更所造成之任何損失（含交易損失），開發者概不負責。<b>繼續使用即表示你同意以上條款。</b></li>
@@ -272,7 +276,7 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const S = { running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, windowWarnings:[], lastStatus:{} };
+  const S = { running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, windowWarnings:[], lastStatus:{}, profiles:[], caPathDirty:false };
   const MARK = {PASS:"✓ 通過", FAIL:"✗ 未通過", SKIP:"－ 未測"};
 
   const api = async (path, opts={}) => {
@@ -284,6 +288,53 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   // 原因文字裡的 https 網址（永豐簽署頁等）變成可點連結；先 esc 再比對，連結走 /api/open 白名單
   const linkify = (s) => esc(s).replace(/https:[/][/][^\s）)]+/g, (u) => `<a href="#" data-open="${u}">${u}</a>`);
+  // 路徑裡的身分證字號打碼（留頭三尾二），跟後端 _redact_text／_PERSON_ID_RE 同一套規則
+  const maskId = (s) => String(s).replace(/([A-Z][1289A-D]\d)\d{5}(\d{2})/gi, (m, a, b) => a.toUpperCase() + "*****" + b);
+  // 帳號密碼自動帶入用：eLeader 資料夾名（比對用，比打碼寬鬆——法人憑證第二碼不一定是 1／2）
+  const EKEY_ID_RE = /\\551\\([A-Za-z][A-Za-z0-9]\d{8})\\S\\?$/;
+  const eleaderIdFromDir = (dir) => {
+    const m = String(dir).replace(/\//g, "\\").match(EKEY_ID_RE);
+    return m ? m[1].toUpperCase() : null;
+  };
+  const normPath = (p) => String(p).replace(/\//g, "\\").toLowerCase();
+  // 只在「點選帳號、瀏覽選檔、啟動時自動採用」這三個事件呼叫；已存過密碼的 profile 不覆寫。
+  // 絕不 console.log 密碼／身分證字號。
+  function maybeAutofillPassword(dir, env){
+    const id = eleaderIdFromDir(dir);
+    if (!id || (env && env.ca_passwd_set)) return false;
+    $("caPwd").value = id;
+    $("saveMsg").textContent = "已自動帶入身分證字號作為憑證密碼，按「儲存設定」生效";
+    updateMarks();
+    return true;
+  }
+  function renderAccounts(st){
+    const box = $("acctList"), row = $("acctRow");
+    const profiles = st.profiles || [];
+    if (!profiles.length && !st.root_env_available){ row.classList.add("hidden"); box.innerHTML = ""; return; }
+    row.classList.remove("hidden");
+    const lines = profiles.map(p => {
+      const masked = esc(maskId(p.dir));
+      const pending = !p.active && S.pendingPfx && normPath(S.pendingPfx) === normPath(p.pfx);
+      const tag = p.active ? '<span class="stamp PASS">使用中</span>' : pending ? '<span class="stamp SKIP">尚未儲存</span>' : p.configured ? '<span class="stamp SKIP">已有設定</span>' : "";
+      const label = p.active ? `<code>${masked}</code>` : `<a href="#" data-switch-pfx="${esc(p.pfx)}"><code>${masked}</code></a>`;
+      return `<div class="row">${label} ${tag}</div>`;
+    });
+    if (st.root_env_available) lines.push('<div class="row"><a href="#" data-switch-pfx="">程式資料夾</a>（切回目前這份 .env）</div>');
+    box.innerHTML = lines.join("");
+  }
+  async function switchProfile(pfx){
+    try {
+      const r = await api("/api/profile", {method:"POST", body: JSON.stringify({pfx})});
+      $("apiKey").value=""; $("secKey").value=""; $("caPwd").value=""; $("clearPwd").checked=false;
+      S.unlockKeys = false; S.caPathDirty = false; S.pendingPfx = r.pending_ca_path || "";
+      await refresh();
+      if (r.pending_ca_path){ $("caPath").value = r.pending_ca_path; S.caPathDirty = true; }  // 還沒存進 .env，refresh 不可洗掉
+      const entry = (S.profiles||[]).find(p => p.pfx === pfx);
+      const filled = entry ? maybeAutofillPassword(entry.dir, r.env) : false;
+      if (!filled) $("saveMsg").textContent = r.pending_ca_path ? "已切換帳號，尚未儲存過設定：按「儲存設定」生效" : "已切換帳號";
+      updateMarks();
+    } catch (err){ alert("切換帳號失敗：" + err.message); }
+  }
 
   function railState(prefix, items){
     const mine = items.filter(i => i.name.startsWith(prefix));
@@ -395,23 +446,28 @@
 
   function applyState(st){
     const e = st.env;
-    $("root").textContent = st.root;
+    $("root").textContent = maskId(st.env_path || st.root);  // 目前 .env 的完整位置，身分證字號打碼
     const b = $("cloudBanner");
     if (st.cloud_sync){ b.classList.remove("hidden"); b.innerHTML = `這個資料夾在雲端同步資料夾裡（路徑含 <b>${esc(st.cloud_sync)}</b>）。.env（金鑰、憑證密碼）與 Sinopac.pfx（憑證本體）會被自動上傳——請把整個資料夾移到本機不同步的位置（例如 C:\\shioaji_wizard），或把它設為不同步。`; } else b.classList.add("hidden");
-    S.env = e; S.cleared = new Set(st.stale || []); S.keysLocked = !!st.keys_locked; updateMarks();
-    // 偵測到 eLeader 預設位置的憑證 → 提供一鍵帶入（只在目前憑證檔找不到時提示）
-    const cands = st.pfx_candidates || []; const eh = $("ekeyHint");
-    if (cands.length && !e.pfx_exists){
-      eh.innerHTML = "<br>偵測到 eLeader 憑證：" + cands.map((p,i) => `<code>${esc(p.replace(/\\([A-Z][12]\d)\d{5}(\d{2})\\/, "\\$1*****$2\\"))}</code> <a href="#" data-usepfx="${esc(p)}">使用這個</a>`).join("、");
-    } else eh.innerHTML = "";
+    S.env = e; S.cleared = new Set(st.stale || []); S.keysLocked = !!st.keys_locked; S.profiles = st.profiles || []; updateMarks();
+    renderAccounts(st);  // 偵測到的 eLeader 憑證常駐清單：不因為套用過就消失
     $("apiKey").placeholder = e.api_key_masked ? `已儲存 ${e.api_key_masked} — 留空保留` : "尚未填：貼上 API Key";
     $("secKey").placeholder = e.sec_key_set ? `已儲存（${e.sec_key_len} 字）— 留空保留` : "尚未填：貼上 Secret Key";
     $("caPwd").placeholder = e.ca_passwd_set ? `已儲存（${e.ca_passwd_len} 字）— 留空保留` : "尚未填：下載憑證時設定的密碼（只跑 A 可先空）";
-    // 憑證檔欄預設留空（placeholder 說明預設位置）；只有使用者自訂過路徑才顯示
-    if (document.activeElement !== $("caPath")) $("caPath").value = e.ca_path_custom ? (e.ca_path || "") : "";
+    // 憑證檔欄預設留空（placeholder 說明預設位置）；只有使用者自訂過路徑才顯示。
+    // S.caPathDirty＝使用者輸入了尚未儲存的值（或剛透過切換帳號／瀏覽選檔帶入）：refresh／輪詢不可覆寫。
+    if (!S.caPathDirty && document.activeElement !== $("caPath")) $("caPath").value = e.ca_path_custom ? (e.ca_path || "") : "";
     $("caPath").placeholder = e.pfx_exists && !e.ca_path_custom ? "已找到同資料夾的 Sinopac.pfx（留空即可）" : "留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔";
     $("pfxState").innerHTML = e.pfx_exists ? '<span class="stamp PASS">找到憑證</span>' : '<span class="stamp FAIL">找不到</span>';
-    if (st.pfx_auto_adopted) $("saveMsg").textContent = "已自動帶入唯一的 eLeader 憑證路徑並儲存";
+    if (st.profile_migrated){
+      // 升級遷移：ROOT 舊版設定原本就指到這張 eLeader 憑證，整份搬過去了（金鑰沒變，只是搬家）
+      $("saveMsg").textContent = "已把設定搬到憑證資料夾 " + maskId(st.root);
+    } else if (st.pfx_auto_adopted){
+      // 啟動時自動採用（三個觸發點之一）：帶入路徑＋（若沒存過密碼）自動帶入身分證字號
+      const p = S.profiles.find(p => p.dir === st.root);
+      if (p){ $("caPath").value = p.pfx; S.caPathDirty = !e.exists; maybeAutofillPassword(p.dir, e); }
+      $("saveMsg").textContent = e.exists ? "已自動切到唯一的 eLeader 憑證帳號並沿用該帳號設定" : "已自動切到唯一的 eLeader 憑證帳號，請填入金鑰後按「儲存設定」";
+    }
     const li = [];
     if (e.decode_error){ li.push(['bad', '.env 不是 UTF-8 編碼，讀不出來。重新填入金鑰按「儲存設定」會覆寫它；或刪掉 .env 再重開。']); }
     else {
@@ -473,7 +529,9 @@
     try {
       await api("/api/run", {method:"POST", body: JSON.stringify({kind, futures: kind === "a" ? S.futures : S.futuresB})});
       S.unlockKeys = false;  // 開始測試＝不再編輯金鑰
-      S.running = true; S.kind = kind; updateButtons(); renderRail(Object.entries(S.lastStatus).map(([name,status])=>({name,status}))); startPoll();
+      S.running = true; S.kind = kind; updateButtons();
+      await refresh();  // 後端已清空 SESSION：檢核單立刻只剩 E 項，不殘留上一次的 A／B
+      startPoll();
     } catch (err){ alert("無法開始：" + err.message); }
   }
 
@@ -482,9 +540,9 @@
     try {
       const body = { api_key: $("apiKey").value, sec_key: $("secKey").value, ca_passwd: $("caPwd").value, ca_path: $("caPath").value, clear_ca_passwd: $("clearPwd").checked, unlock_keys: !!S.unlockKeys };
       const r = await api("/api/env", {method:"POST", body: JSON.stringify(body)});
-      S.cleared = new Set(r.stale || []);
+      S.cleared = new Set(r.stale || []); S.profiles = r.profiles || S.profiles;
       $("apiKey").value=""; $("secKey").value=""; $("caPwd").value=""; $("clearPwd").checked=false;
-      S.unlockKeys = false;
+      S.unlockKeys = false; S.caPathDirty = false;  // 已儲存＝目前欄位值就是權威值，之後 refresh 可以正常同步
       $("saveMsg").textContent = "已儲存到 .env";
       await refresh(); renderSummary(r.summary);
     } catch (err){ $("saveMsg").textContent = "沒存成：" + err.message; }
@@ -492,14 +550,28 @@
   $("btnBrowse").onclick = async () => {
     $("btnBrowse").disabled = true;
     $("saveMsg").textContent = "選檔視窗已開啟（會浮在最前面；若沒看到，請看工作列的「選擇憑證」）…";
-    try { const r = await api("/api/browse", {method:"POST"}); if (r.path){ $("caPath").value = r.path; $("saveMsg").textContent = "已選好憑證，按「儲存設定」生效"; } else { $("saveMsg").textContent = r.error ? "" : "沒有選擇檔案"; if (r.error) alert(r.error); } }
+    try {
+      const r = await api("/api/browse", {method:"POST"});
+      if (r.path){
+        // 選到的檔案若是偵測到的 eLeader 憑證之一 → 比照點選帳號，直接切換 profile；
+        // 否則維持現況：填欄位、提示按儲存（自訂路徑，不猜 profile）。
+        const matched = (S.profiles||[]).find(p => normPath(p.pfx) === normPath(r.path));
+        if (matched){
+          await switchProfile(matched.pfx);
+        } else {
+          $("caPath").value = r.path; S.caPathDirty = true;
+          $("saveMsg").textContent = "已選好憑證，按「儲存設定」生效";
+        }
+      } else { $("saveMsg").textContent = r.error ? "" : "沒有選擇檔案"; if (r.error) alert(r.error); }
+    }
     catch (err){ $("saveMsg").textContent = ""; alert(err.message); } finally { $("btnBrowse").disabled = false; }
   };
   $("btnExport").onclick = async () => {
     try { const r = await api("/api/export-log", {method:"POST"}); alert("已匯出：\n" + r.path + "\n\n回報問題時附上這個檔（金鑰已遮罩）。"); }
     catch (err){ alert("匯出失敗：" + err.message); }
   };
-  ["apiKey","secKey","caPwd","caPath"].forEach(id => $(id).addEventListener("input", updateMarks));
+  ["apiKey","secKey","caPwd"].forEach(id => $(id).addEventListener("input", updateMarks));
+  $("caPath").addEventListener("input", () => { S.caPathDirty = true; updateMarks(); });
   $("clearPwd").addEventListener("change", updateMarks);
   $("btnUnlock").onclick = () => {
     if (!confirm("金鑰已驗證通過。只有要更換 API Key／Secret Key 時才需要解鎖；解鎖後貼上新金鑰並儲存，之後要重新跑 A 驗證。\n確定解鎖？")) return;
@@ -516,8 +588,8 @@
   $("btnHelp").onclick = () => $("help").showModal();
   $("btnHelpClose").onclick = () => $("help").close();
   document.addEventListener("click", (ev) => {
-    const u = ev.target.closest("a[data-usepfx]");
-    if (u){ ev.preventDefault(); $("caPath").value = u.dataset.usepfx; updateMarks(); $("saveMsg").textContent = "已帶入 eLeader 憑證路徑，按「儲存設定」生效"; return; }
+    const sw = ev.target.closest("a[data-switch-pfx]");
+    if (sw){ ev.preventDefault(); switchProfile(sw.dataset.switchPfx); return; }
     const a = ev.target.closest("a[data-open]"); if (!a) return;
     ev.preventDefault();
     fetch("/api/open", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({url: a.dataset.open})}).catch(()=>{});

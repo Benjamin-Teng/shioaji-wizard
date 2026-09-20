@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shioaji_wizard import test_ca, test_sim_order
+from shioaji_wizard import certinfo, test_ca, test_sim_order
 from shioaji_wizard.diagnostics import missing_account_reason
 from shioaji_wizard.sjenv import Report
 
@@ -196,3 +196,228 @@ def test_ca_expiry_classification_fails_when_person_id_is_unavailable():
     assert status == "FAIL"
     assert "person_id" in reason
     assert "無法查詢" in reason
+
+
+def test_mask_taiwan_id_keeps_front_three_and_back_two():
+    assert test_ca.mask_taiwan_id("A123456789") == "A12*****89"
+
+
+def test_cert_subject_matches_logged_in_person_id_reports_no_mismatch():
+    reason = test_ca.cert_subject_mismatch_reason("CN=A123456789, O=Sinopac", {"A123456789", "B234567890"})
+
+    assert reason == ""
+
+
+def test_cert_subject_mismatches_logged_in_person_id_names_both_masked():
+    reason = test_ca.cert_subject_mismatch_reason("CN=A123456789, O=Sinopac", {"B234567890"})
+
+    assert "憑證屬於 A12*****89" in reason
+    assert "與登入帳號" in reason
+    assert "B23*****90" in reason
+    assert "不同人" in reason
+    # 完整字號不應該外洩
+    assert "A123456789" not in reason
+    assert "B234567890" not in reason
+
+
+def test_cert_subject_without_id_pattern_reports_nothing():
+    reason = test_ca.cert_subject_mismatch_reason("CN=shioaji-wizard-test", {"B234567890"})
+
+    assert reason == ""
+
+
+def test_build_offline_diagnostic_reports_expiry_date_and_mismatch():
+    cert = certinfo.CertInfo(not_after=datetime(2028, 8, 22, tzinfo=UTC), subject="CN=A123456789, O=Sinopac")
+
+    reason = test_ca.build_offline_diagnostic(cert, {"B234567890"})
+
+    assert "2028-08-22" in reason
+    assert "是同一人的" in reason
+    assert "憑證屬於 A12*****89" in reason
+
+
+def test_offline_pfx_check_settles_b4_and_b6_without_login_or_shioaji(tmp_path):
+    """B4／B6 是純離線檢查：不需要 shioaji、不需要登入，缺檔案也能直接得到結論。"""
+    rep = Report()
+    missing_pfx = tmp_path / "Sinopac.pfx"
+
+    cert, settled = test_ca._check_offline_pfx(rep, missing_pfx, "somepass")
+
+    assert cert is None
+    assert settled is True
+    pfx_item = next(item for item in rep.items if item["name"] == test_ca.B_PFX)
+    expire_item = next(item for item in rep.items if item["name"] == test_ca.B_EXPIRE)
+    assert pfx_item["status"] == "FAIL"
+    assert expire_item["status"] == "SKIP"
+
+
+def test_build_offline_diagnostic_without_mismatch_only_reports_expiry():
+    cert = certinfo.CertInfo(not_after=datetime(2028, 8, 22, tzinfo=UTC), subject="CN=shioaji-wizard-test")
+
+    reason = test_ca.build_offline_diagnostic(cert, {"B234567890"})
+
+    assert "2028-08-22" in reason
+    assert "憑證屬於" not in reason
+
+
+@pytest.mark.parametrize("activate", ["raises", "false"])
+def test_b_main_records_all_six_items_once_when_offline_unavailable_and_activate_fails(
+    monkeypatch, tmp_path, activate
+):
+    """離線讀取不可用＋B5 啟用失敗：B6 要記成 SKIP，不能整列從檢核單消失。"""
+    import sys
+
+    pfx = tmp_path / "Sinopac.pfx"
+    pfx.write_bytes(b"x")
+    recorded: list[Report] = []
+
+    class SpyReport(Report):
+        def __init__(self) -> None:
+            super().__init__()
+            recorded.append(self)
+
+    def unavailable(*_a, **_k):
+        raise certinfo.CertReadError("unavailable", "no powershell")
+
+    class FakeApi:
+        def __init__(self, simulation: bool) -> None:
+            assert simulation is False
+
+        def set_order_callback(self, _cb) -> None:
+            pass
+
+        def login(self, _k, _s):
+            return [
+                SimpleNamespace(
+                    account_type="S", broker_id="9A95", account_id="1", signed=True, person_id="A123456789"
+                )
+            ]
+
+        def activate_ca(self, **_k):
+            if activate == "raises":
+                raise RuntimeError("boom")
+            return False
+
+        def logout(self) -> None:
+            pass
+
+    monkeypatch.setitem(sys.modules, "shioaji", SimpleNamespace(Shioaji=FakeApi))
+    monkeypatch.setattr(test_ca, "Report", SpyReport)
+    monkeypatch.setattr(
+        test_ca, "load_env", lambda: {"SJ_API_KEY": "k", "SJ_SEC_KEY": "s", "SJ_CA_PASSWD": "pw"}
+    )
+    monkeypatch.setattr(test_ca, "pfx_path", lambda _env: pfx)
+    monkeypatch.setattr(test_ca.certinfo, "read_pfx_info", unavailable)
+    monkeypatch.setattr(sys, "argv", ["test_ca"])
+
+    assert test_ca.main() == 1
+
+    names = [item["name"] for item in recorded[0].items]
+    expected = [
+        test_ca.B_LOGIN,
+        test_ca.B_STOCK_SIGNED,
+        test_ca.B_FUT_SIGNED,
+        test_ca.B_PFX,
+        test_ca.B_ACTIVATE,
+        test_ca.B_EXPIRE,
+    ]
+    assert sorted(names) == sorted(expected)
+    status = {item["name"]: item["status"] for item in recorded[0].items}
+    assert status[test_ca.B_ACTIVATE] == "FAIL"
+    assert status[test_ca.B_EXPIRE] == "SKIP"
+
+
+def test_b_main_records_all_six_items_when_shioaji_constructor_fails(monkeypatch, tmp_path):
+    """Shioaji() 建構就失敗（native runtime 壞掉）：六項仍各記一次，不是程式直接炸掉。"""
+    import sys
+
+    recorded: list[Report] = []
+
+    class SpyReport(Report):
+        def __init__(self) -> None:
+            super().__init__()
+            recorded.append(self)
+
+    def broken(**_k):
+        raise RuntimeError("native runtime missing")
+
+    def unavailable(*_a, **_k):
+        raise certinfo.CertReadError("unavailable", "no powershell")
+
+    pfx = tmp_path / "Sinopac.pfx"
+    pfx.write_bytes(b"x")
+    monkeypatch.setitem(sys.modules, "shioaji", SimpleNamespace(Shioaji=broken))
+    monkeypatch.setattr(test_ca, "Report", SpyReport)
+    monkeypatch.setattr(
+        test_ca, "load_env", lambda: {"SJ_API_KEY": "k", "SJ_SEC_KEY": "s", "SJ_CA_PASSWD": "pw"}
+    )
+    monkeypatch.setattr(test_ca, "pfx_path", lambda _env: pfx)
+    monkeypatch.setattr(test_ca.certinfo, "read_pfx_info", unavailable)
+    monkeypatch.setattr(sys, "argv", ["test_ca"])
+
+    assert test_ca.main() == 2
+
+    names = sorted(item["name"] for item in recorded[0].items)
+    assert names == sorted(
+        [
+            test_ca.B_LOGIN,
+            test_ca.B_STOCK_SIGNED,
+            test_ca.B_FUT_SIGNED,
+            test_ca.B_PFX,
+            test_ca.B_ACTIVATE,
+            test_ca.B_EXPIRE,
+        ]
+    )
+
+
+_ALL_A = [
+    test_sim_order.A_LOGIN,
+    test_sim_order.A_STOCK_ACC,
+    test_sim_order.A_STOCK_ORDER,
+    test_sim_order.A_FUT_ACC,
+    test_sim_order.A_FUT_ORDER,
+]
+
+
+@pytest.mark.parametrize("failure", ["no_keys", "import", "constructor", "login"])
+def test_a_main_records_all_five_items_once_on_every_early_exit(monkeypatch, failure):
+    """A1 之前／當下任何失敗，檢核單仍固定五列（A2–A5 補 SKIP），不是只剩 A1。"""
+    import sys
+
+    recorded: list[Report] = []
+
+    class SpyReport(Report):
+        def __init__(self) -> None:
+            super().__init__()
+            recorded.append(self)
+
+    class FakeApi:
+        def __init__(self, simulation: bool) -> None:
+            assert simulation is True
+            if failure == "constructor":
+                raise RuntimeError("native runtime missing")
+
+        def set_order_callback(self, _cb) -> None:
+            pass
+
+        def login(self, _k, _s):
+            raise RuntimeError("login refused")
+
+        def logout(self) -> None:
+            pass
+
+    env = {} if failure == "no_keys" else {"SJ_API_KEY": "k", "SJ_SEC_KEY": "s"}
+    # sys.modules 的值為 None 時 import 會丟 ImportError：模擬 shioaji 載入失敗
+    monkeypatch.setitem(
+        sys.modules, "shioaji", None if failure == "import" else SimpleNamespace(Shioaji=FakeApi)
+    )
+    monkeypatch.setattr(test_sim_order, "Report", SpyReport)
+    monkeypatch.setattr(test_sim_order, "load_env", lambda: env)
+    monkeypatch.setattr(sys, "argv", ["test_sim_order"])
+
+    assert test_sim_order.main() != 0
+
+    assert sorted(item["name"] for item in recorded[0].items) == sorted(_ALL_A)
+    status = {item["name"]: item["status"] for item in recorded[0].items}
+    assert status[test_sim_order.A_LOGIN] == "FAIL"
+    assert all(status[n] == "SKIP" for n in _ALL_A[1:])

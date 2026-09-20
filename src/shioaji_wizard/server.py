@@ -4,6 +4,7 @@
   GET  /                 單頁前端
   GET  /api/state        .env 檢查（值遮罩）、工作資料夾、雲端同步警告、目前 job、總覽
   POST /api/env          寫入 .env（只改有送的欄位；其他既有內容不動）
+  POST /api/profile      切換目前作用中的帳號（eLeader 憑證資料夾）或切回程式資料夾
   POST /api/browse       開系統檔案對話框選憑證（Windows：PowerShell OpenFileDialog）
   GET  /api/window       台灣時間＋測試時段＋（18–20 點）IP 檢查
   POST /api/run          啟動 A／B 測試（子行程），同一時間只跑一個
@@ -14,6 +15,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -35,13 +37,13 @@ from shioaji_wizard.guards import install_guards
 from shioaji_wizard.shell import _POWERSHELL
 from shioaji_wizard.sjenv import (
     DEFAULT_PFX,
-    ENV_PATH,
     FAIL,
     OPTIONAL_KEYS,
     PASS,
     REQUIRED_KEYS,
     ROOT,
     RUNTIME,
+    atomic_write_text,
     ensure_env_keys,
     ensure_runtime_dir,
     parse_env_text,
@@ -126,6 +128,154 @@ def heartbeat_age() -> float:
     return time.monotonic() - _last_heartbeat
 
 
+# ---------------------------------------------------------------- 多帳號（eLeader 憑證資料夾）
+# 永豐 eLeader 申請的憑證預設存放：C:\ekey\551\<身分證字號>\S\*.pfx。
+# SJ_EKEY_BASE 可覆寫這個位置（QA 用假樹模擬，不動真的 C:\ekey）。
+EKEY_BASE = Path(os.environ.get("SJ_EKEY_BASE") or r"C:\ekey\551")
+
+
+def find_eleader_pfx(base: Path | None = None) -> list[str]:
+    """列出 eLeader 預設位置的憑證檔（只有裝過 eLeader 的電腦才會有）；沒有就回空清單。"""
+    base = base if base is not None else EKEY_BASE
+    if sys.platform != "win32" or not base.is_dir():
+        return []
+    try:
+        return sorted(str(p) for p in base.glob("*/S/*.pfx") if p.is_file())
+    except OSError:
+        return []
+
+
+def _normalize_path(p: str) -> str:
+    """路徑比較用正規化：統一斜線分隔字元、忽略大小寫（Windows 路徑不分大小寫、
+    正反斜線皆可）。"""
+    return str(Path(p)).lower()
+
+
+def profile_dir_for(pfx: str) -> Path:
+    """這個憑證檔屬於哪個 profile 目錄：在 find_eleader_pfx() 清單內就回它的父目錄
+    （……\\<身分證字號>\\S），否則回 ROOT（沿用程式資料夾）。"""
+    norm = _normalize_path(pfx)
+    for c in find_eleader_pfx():
+        if _normalize_path(c) == norm:
+            return Path(c).parent
+    return ROOT
+
+
+_ACTIVE_PROFILE_FILE = RUNTIME / "active-profile"
+
+
+def _read_active_profile() -> Path:
+    """讀取持久化的目前 profile；只信任 ROOT 或目前偵測到的候選之父目錄，否則退回
+    ROOT（避免舊紀錄指到已拔除的憑證資料夾，或被竄改成任意路徑）。"""
+    if not _ACTIVE_PROFILE_FILE.is_file():
+        return ROOT
+    try:
+        text = _ACTIVE_PROFILE_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ROOT
+    if not text:
+        return ROOT
+    candidate_dir = Path(text)
+    if candidate_dir == ROOT:
+        return ROOT
+    valid_dirs = {Path(c).parent for c in find_eleader_pfx()}
+    return candidate_dir if candidate_dir in valid_dirs else ROOT
+
+
+def _persist_active_profile(path: Path) -> None:
+    """寫不進去就往上拋（OSError）：記不住的切換下次啟動會默默回到 ROOT，等於用錯帳號，
+    所以呼叫端一律「先持久化、成功才改記憶體狀態」。"""
+    _write_active_profile_text(str(path))
+
+
+def _write_active_profile_text(text: str) -> None:
+    ensure_runtime_dir()
+    atomic_write_text(_ACTIVE_PROFILE_FILE, text)
+
+
+_profile_dir: Path = _read_active_profile()  # 目前作用中的 profile 目錄；.env 實際落在這裡
+
+
+def env_path() -> Path:
+    return _profile_dir / ".env"
+
+
+def _snapshot_profile_state() -> tuple[Path, dict[str, dict[str, str]], set[str]]:
+    """切換前拍照（只有記憶體狀態）：目前 profile 目錄、SESSION、_STALE_FIELDS。"""
+    return _profile_dir, dict(SESSION), set(_STALE_FIELDS)
+
+
+def _restore_profile_state(snapshot: tuple[Path, dict[str, dict[str, str]], set[str]]) -> None:
+    """切換失敗時退回切換前。active-profile 一律「最後才提交」，失敗路徑上磁碟紀錄
+    從沒被動過，所以這裡只需要還原記憶體——不存在「回滾持久化又失敗」的雙重故障。"""
+    global _profile_dir
+    _profile_dir, prev_session, prev_stale = snapshot
+    SESSION.clear()
+    SESSION.update(prev_session)
+    _STALE_FIELDS.clear()
+    _STALE_FIELDS.update(prev_stale)
+
+
+def _enter_profile_dir(target_dir: Path) -> None:
+    """只改記憶體狀態：換 profile、清空檢核單、四欄標為未知（新帳號一律視為未驗證，
+    金鑰不沿用鎖定狀態）。呼叫端做完該做的 .env 寫入後，必須再呼叫
+    ``_persist_active_profile`` 提交；任何一步 OSError 就 ``_restore_profile_state``。"""
+    global _profile_dir
+    _profile_dir = target_dir
+    SESSION.clear()
+    _STALE_FIELDS.clear()
+    _STALE_FIELDS.update({"api", "sec", "pwd", "path"})
+
+
+def _switch_profile_dir(target_dir: Path) -> None:
+    """不需要寫 .env 的單純切換：失敗（OSError）→ 什麼都不變、往上拋。"""
+    snapshot = _snapshot_profile_state()
+    _enter_profile_dir(target_dir)
+    try:
+        _persist_active_profile(target_dir)
+    except OSError:
+        _restore_profile_state(snapshot)
+        raise
+
+
+def _decodes_as_env(data: bytes) -> bool:
+    try:
+        data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def _switch_to_pfx(pfx: str) -> str | None:
+    """切到 pfx 所屬的 profile（沿用 profile_dir_for 的判斷）。目標目錄已有 .env→只
+    把 SJ_CA_PATH 改寫為這個 pfx（其他鍵原封不動，等同沿用既有金鑰）；沒有 .env→
+    不建立任何檔案，回傳 pending_ca_path 讓呼叫端／前端知道要等使用者按儲存。
+
+    順序：先寫 .env、最後才提交 active-profile；任何一步 OSError → 還原記憶體再上拋。"""
+    target_dir = profile_dir_for(pfx)
+    # 目標檔快照要在動任何狀態之前拍：這一步讀取失敗（OSError）就是什麼都還沒變
+    target_env = target_dir / ".env"
+    target_before = target_env.read_bytes() if target_dir != ROOT and target_env.is_file() else None
+    snapshot = _snapshot_profile_state()
+    _enter_profile_dir(target_dir)
+    try:
+        pending = None
+        if target_dir != ROOT:
+            if target_before is None:
+                pending = pfx
+            elif _decodes_as_env(target_before):
+                write_env_values({"SJ_CA_PATH": pfx})
+            # 編碼壞掉的 .env：單純切換帳號不重建它（畫面會顯示編碼問題，使用者按儲存才重建）
+        _persist_active_profile(target_dir)
+    except OSError:
+        if target_before is not None:  # 切換沒成立就不該留下改過的 .env
+            with contextlib.suppress(OSError):
+                target_env.write_bytes(target_before)
+        _restore_profile_state(snapshot)
+        raise
+    return pending
+
+
 # ---------------------------------------------------------------- .env
 def _mask(v: str) -> str:
     if not v:
@@ -136,10 +286,11 @@ def _mask(v: str) -> str:
 
 
 def read_env_text() -> str | None:
-    if not ENV_PATH.is_file():
+    p = env_path()
+    if not p.is_file():
         return ""
     try:
-        return ENV_PATH.read_text(encoding="utf-8-sig")
+        return p.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:
         return None
     except OSError:
@@ -147,7 +298,9 @@ def read_env_text() -> str | None:
 
 
 def inspect_env() -> dict[str, Any]:
-    """檢查 .env：回傳遮罩後的值、問題清單、E1～E3，並把 E1～E3 記進 SESSION。缺鍵自動補。"""
+    """檢查目前 profile 的 .env：回傳遮罩後的值、問題清單、E1～E3，並把 E1～E3 記進
+    SESSION。缺鍵自動補。"""
+    p = env_path()
     text = read_env_text()
     if text is None:
         record(E_FORMAT, FAIL, ".env 不是 UTF-8 編碼，讀不出來（請在此畫面重新儲存一次，或刪除 .env 重建）")
@@ -160,9 +313,9 @@ def inspect_env() -> dict[str, Any]:
             "ok_a": False,
             "ok_b": False,
         }
-    exists = ENV_PATH.is_file()
+    exists = p.is_file()
     if exists:
-        ensure_env_keys(ENV_PATH, {"SJ_CA_PATH": DEFAULT_PFX.as_posix(), "SJ_CA_PASSWD": ""})
+        ensure_env_keys(p, {"SJ_CA_PATH": DEFAULT_PFX.as_posix(), "SJ_CA_PASSWD": ""})
         text = read_env_text() or ""
     values, problems = parse_env_text(text)
     ok_a = True
@@ -222,10 +375,18 @@ def inspect_env() -> dict[str, Any]:
 
 
 def write_env_values(updates: dict[str, str]) -> None:
-    """只改指定的鍵：既有行就地替換值，沒有的補在檔尾；其他行（註解、別的設定）原樣保留。"""
-    text = read_env_text()
-    if text is None:
-        text = ""  # 編碼壞掉：重建
+    """只改指定的鍵：既有行就地替換值，沒有的補在檔尾；其他行（註解、別的設定）原樣保留。
+    寫進目前 profile 目錄的 .env（``env_path()``）。
+
+    既有檔案讀不到（OSError：防毒鎖定、ACL、I/O）→ 往上拋，**不可**當成空檔重建，那會
+    把金鑰整份洗掉。只有「編碼壞掉」才重建（使用者按儲存時的既有語義）。"""
+    p = env_path()
+    text = ""
+    if p.is_file():
+        try:
+            text = p.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            text = ""  # 編碼壞掉：重建
     lines = text.splitlines()
     done: set[str] = set()
     out: list[str] = []
@@ -247,35 +408,108 @@ def write_env_values(updates: dict[str, str]) -> None:
     for k in ("SJ_API_KEY", "SJ_SEC_KEY", "SJ_CA_PASSWD", "SJ_CA_PATH"):
         if k in updates and k not in done:
             out.append(f"{k}={updates[k]}")
-    ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
-
-
-EKEY_BASE = Path(r"C:\ekey\551")  # eLeader 申請的憑證預設存放：C:\ekey\551\<身分證字號>\S\*.pfx
-
-
-def find_eleader_pfx(base: Path = EKEY_BASE) -> list[str]:
-    """列出 eLeader 預設位置的憑證檔（只有裝過 eLeader 的電腦才會有）；沒有就回空清單。"""
-    if sys.platform != "win32" or not base.is_dir():
-        return []
-    try:
-        return sorted(str(p) for p in base.glob("*/S/*.pfx") if p.is_file())
-    except OSError:
-        return []
+    atomic_write_text(env_path(), "\n".join(out) + "\n")
 
 
 def auto_adopt_eleader_pfx(env: dict[str, Any], candidates: list[str]) -> bool:
-    """目前憑證失效且只有一個 eLeader 候選時，安全地寫入該路徑。"""
+    """尚未有人為切換過 profile（含切回程式資料夾）、目前 pfx 不存在、且候選恰好一筆
+    → 自動切到該 profile（與 /api/profile 相同的切換規則）。多筆候選不猜。
+
+    ROOT 的 .env 已經有金鑰（升級前的單人設定）時，不要整份跳過去——先用舊行為只改
+    SJ_CA_PATH（留在 ROOT、標 path stale），讓 ``_migrate_root_env_if_pointing_to_profile``
+    在同一次 /api/state 裡接著把整份搬過去，金鑰才不會憑空消失。ROOT 沒有 .env 或
+    金鑰皆空（沒東西好保留）時，才直接切換＋pending。"""
+    if _ACTIVE_PROFILE_FILE.is_file():
+        return False
     if env.get("decode_error") or env.get("pfx_exists") or len(candidates) != 1:
         return False
-    candidate = Path(candidates[0])
-    if not candidate.is_file():
+    candidate = candidates[0]
+    if not Path(candidate).is_file():
         return False
+    if env.get("api_key_masked") or env.get("sec_key_set"):
+        try:
+            write_env_values({"SJ_CA_PATH": candidate})
+        except OSError:
+            return False
+        _STALE_FIELDS.add("path")
+        return True
     try:
-        write_env_values({"SJ_CA_PATH": candidate.resolve().as_posix()})
+        _switch_to_pfx(candidate)
     except OSError:
         return False
-    _STALE_FIELDS.add("path")
     return True
+
+
+def _copy_env_bytes(src: Path, dst: Path) -> None:
+    dst.write_bytes(src.read_bytes())
+
+
+def _migrate_root_env_if_pointing_to_profile() -> bool:
+    """升級遷移：目前 profile 還是 ROOT、ROOT/.env 存在、其 SJ_CA_PATH 命中某個
+    eLeader 候選、且該候選的資料夾還沒有 .env → 把整份 .env 原樣（位元組）搬過去，
+    只是換位置、金鑰沒變：不清 SESSION、不標 stale。ROOT 的舊檔留著不刪（使用者
+    可能還沒信任新畫面）。複製失敗 → 留在 ROOT、不留半個檔、不拋錯。"""
+    global _profile_dir
+    if _profile_dir != ROOT:
+        return False
+    root_env = ROOT / ".env"
+    if not root_env.is_file():
+        return False
+    values, _ = parse_env_text(read_env_text() or "")
+    resolved = _normalize_path(str(pfx_path(values)))
+    target_pfx = next((c for c in find_eleader_pfx() if _normalize_path(c) == resolved), None)
+    if target_pfx is None:
+        return False
+    target_dir = Path(target_pfx).parent
+    target_env = target_dir / ".env"
+    if target_env.is_file():
+        return False
+    try:
+        _copy_env_bytes(root_env, target_env)
+    except OSError:
+        try:
+            target_env.unlink()
+        except OSError:
+            pass
+        return False
+    try:
+        _persist_active_profile(target_dir)
+    except OSError:  # 記不住就不搬：留在 ROOT，剛複製的那份收掉
+        with contextlib.suppress(OSError):
+            target_env.unlink()
+        return False
+    _profile_dir = target_dir
+    return True
+
+
+def _profile_configured(dir_: Path) -> bool:
+    """該目錄的 .env 是否已有完整金鑰（只回布林，不回任何金鑰值）。"""
+    p = dir_ / ".env"
+    if not p.is_file():
+        return False
+    try:
+        text = p.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):  # 別的帳號的檔壞了，不能拖垮整個 /api/state
+        return False
+    values, _ = parse_env_text(text)
+    return bool(values.get("SJ_API_KEY")) and bool(values.get("SJ_SEC_KEY"))
+
+
+def _profiles_list(candidates: list[str]) -> list[dict[str, Any]]:
+    """偵測到的每張 eLeader 憑證常駐一筆：不論目前 pfx_exists 與否都回傳。"""
+    values, _ = parse_env_text(read_env_text() or "")
+    active_norm = _normalize_path(str(pfx_path(values)))
+    out = []
+    for c in candidates:
+        out.append(
+            {
+                "pfx": c,
+                "dir": str(Path(c).parent),
+                "configured": _profile_configured(Path(c).parent),
+                "active": _normalize_path(c) == active_norm,
+            }
+        )
+    return out
 
 
 def cloud_sync_tag() -> str:
@@ -342,6 +576,7 @@ def window_check() -> dict[str, Any]:
 def _run_job(job: Job, module: str, args: list[str]) -> None:
     env = dict(os.environ)
     env["SJ_ENV_DIR"] = str(ROOT)
+    env["SJ_PROFILE_DIR"] = str(_profile_dir)  # 子行程（test_ca／test_sim_order）沿用目前 profile 的 .env
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
@@ -457,6 +692,10 @@ class EnvIn(BaseModel):
     unlock_keys: bool = False  # 金鑰已被 A/B 驗證通過後預設鎖定；要換金鑰必須明示解鎖
 
 
+class ProfileIn(BaseModel):
+    pfx: str = ""  # 空字串＝切回程式資料夾；否則必須是 find_eleader_pfx() 清單內的路徑
+
+
 def keys_verified() -> bool:
     """API Key／Secret Key 是否已被最近一次 A1 或 B1 驗證通過，且之後沒再改過。"""
     if "api" in _STALE_FIELDS or "sec" in _STALE_FIELDS:
@@ -488,9 +727,12 @@ def api_state() -> dict[str, Any]:
         auto_adopted = auto_adopt_eleader_pfx(env, candidates)
         if auto_adopted:
             env = inspect_env()
+        migrated = _migrate_root_env_if_pointing_to_profile()
+        if migrated:
+            env = inspect_env()
         return {
-            "root": str(ROOT),
-            "env_path": str(ENV_PATH),
+            "root": str(_profile_dir),
+            "env_path": str(env_path()),
             "cloud_sync": cloud_sync_tag(),
             "env": env,
             "job": {"running": bool(_job and _job.running), "kind": _job.kind if _job else ""},
@@ -499,8 +741,10 @@ def api_state() -> dict[str, Any]:
             "version": APP_VERSION,
             "stale": sorted(_STALE_FIELDS),
             "keys_locked": keys_verified(),
-            "pfx_candidates": candidates,
+            "profiles": _profiles_list(candidates),
             "pfx_auto_adopted": auto_adopted,
+            "profile_migrated": migrated,
+            "root_env_available": _profile_dir != ROOT and (ROOT / ".env").is_file(),
         }
 
 
@@ -514,6 +758,33 @@ def api_env(body: EnvIn) -> dict[str, Any]:
             # 否則能在 .env 注入第二個鍵（ca_path 不受金鑰鎖定保護）
             if "".join(v.splitlines()) != v:
                 raise HTTPException(400, "值不可含換行（會破壞 .env 格式）")
+        cap = body.ca_path.strip().strip('"')
+        original_profile = _profile_dir
+        original_values, _ = parse_env_text(read_env_text() or "")
+        # 憑證檔指到某個 eLeader profile → 先切過去（沿用該資料夾既有金鑰）；留空 → 回程式資料夾。
+        target_dir = profile_dir_for(cap) if cap else ROOT
+        # 升級遷移的保底：這次儲存其實是從 ROOT 切到一個還沒有 .env 的 eLeader 資料夾，
+        # 而且 ROOT 原本的 SJ_CA_PATH 就已經指到同一張憑證（畫面上欄位還沒變、使用者只改了
+        # 別的欄位）——等同「先遷移再寫」，空白欄位要沿用 ROOT 的值，金鑰才不會憑空消失。
+        # 其他情況（帳號 A 切帳號 B、或 ROOT 指的是別張憑證）一律不帶金鑰過去。
+        migrating_from_root = bool(
+            cap
+            and original_profile == ROOT
+            and target_dir != ROOT
+            and not (target_dir / ".env").is_file()
+            and _normalize_path(str(pfx_path(original_values)))
+            == _normalize_path(str(pfx_path({"SJ_CA_PATH": cap})))
+        )
+        # 目標檔快照要在動任何狀態之前拍：這一步讀取失敗就是什麼都還沒變
+        target_env = target_dir / ".env"
+        try:
+            target_before = target_env.read_bytes() if target_env.is_file() else None
+        except OSError as e:
+            raise HTTPException(500, f"讀取設定失敗（{target_env}）：{e}") from e
+        snapshot = _snapshot_profile_state()
+        switching = target_dir != _profile_dir
+        if switching:
+            _enter_profile_dir(target_dir)  # 先只改記憶體；.env 寫成功後才提交 active-profile
         updates: dict[str, str] = {}
         if (body.api_key.strip() or body.sec_key.strip()) and keys_verified() and not body.unlock_keys:
             raise HTTPException(409, "API Key／Secret Key 已驗證通過並鎖定；要更換請先按「解鎖修改」")
@@ -525,7 +796,6 @@ def api_env(body: EnvIn) -> dict[str, Any]:
             updates["SJ_CA_PASSWD"] = ""
         elif body.ca_passwd.strip():
             updates["SJ_CA_PASSWD"] = body.ca_passwd.strip()
-        cap = body.ca_path.strip().strip('"')
         updates["SJ_CA_PATH"] = Path(cap).expanduser().as_posix() if cap else DEFAULT_PFX.as_posix()
         prev_values, _ = parse_env_text(read_env_text() or "")
         if "SJ_API_KEY" in updates and updates["SJ_API_KEY"] != prev_values.get("SJ_API_KEY"):
@@ -536,13 +806,71 @@ def api_env(body: EnvIn) -> dict[str, Any]:
             _STALE_FIELDS.add("pwd")
         if updates["SJ_CA_PATH"] != (prev_values.get("SJ_CA_PATH") or DEFAULT_PFX.as_posix()):
             _STALE_FIELDS.add("path")
-        if not ENV_PATH.is_file():
-            # 第一次建立：四鍵都寫，沒給的留空
+        if not env_path().is_file():
+            # 第一次建立：四鍵都寫，沒給的原則上留空——除非這是從 ROOT 搬過來的同一張憑證
+            # （migrating_from_root），這種情況沒給的欄位沿用 ROOT 原值。
+            fallback_source = original_values if migrating_from_root else {}
             for k in ("SJ_API_KEY", "SJ_SEC_KEY", "SJ_CA_PASSWD"):
-                updates.setdefault(k, "")
-        write_env_values(updates)
+                updates.setdefault(k, fallback_source.get(k, ""))
+        try:
+            write_env_values(updates)
+            if switching:
+                try:
+                    _persist_active_profile(target_dir)
+                except OSError:
+                    # 回 500 的請求不可以留下已改過的目標 .env：還原成寫入前的位元組
+                    with contextlib.suppress(OSError):
+                        if target_before is None:
+                            target_env.unlink()
+                        else:
+                            target_env.write_bytes(target_before)
+                    raise
+        except OSError as e:
+            _restore_profile_state(snapshot)  # 含這次才加的 stale 標記一併退回
+            raise HTTPException(500, f"寫入設定失敗（{target_env}）：{e}") from e
         env = inspect_env()
-        return {"ok": True, "env": env, "summary": summary_items(), "stale": sorted(_STALE_FIELDS)}
+        return {
+            "ok": True,
+            "env": env,
+            "summary": summary_items(),
+            "stale": sorted(_STALE_FIELDS),
+            "profiles": _profiles_list(find_eleader_pfx()),
+        }
+
+
+@app.post("/api/profile")
+def api_profile(body: ProfileIn) -> dict[str, Any]:
+    """切換目前作用中的帳號：pfx 留空＝切回程式資料夾；否則必須是偵測到的 eLeader
+    憑證（白名單，不接受任意路徑）。"""
+    with _lock:
+        if _job and _job.running:
+            raise HTTPException(409, "測試進行中，請等它結束再切換帳號")
+        pfx = body.pfx.strip()
+        if pfx == "":
+            try:
+                _switch_profile_dir(ROOT)
+            except OSError as e:
+                raise HTTPException(500, f"切換帳號失敗：{e}") from e
+            pending_ca_path: str | None = None
+        else:
+            candidates = find_eleader_pfx()
+            norm_map = {_normalize_path(c): c for c in candidates}
+            canon = norm_map.get(_normalize_path(pfx))
+            if canon is None:
+                raise HTTPException(400, "不是偵測到的 eLeader 憑證，無法切換")
+            try:
+                pending_ca_path = _switch_to_pfx(canon)
+            except OSError as e:
+                raise HTTPException(500, f"切換帳號失敗：{e}") from e
+        env = inspect_env()
+        return {
+            "ok": True,
+            "env": env,
+            "summary": summary_items(),
+            "stale": sorted(_STALE_FIELDS),
+            "profiles": _profiles_list(find_eleader_pfx()),
+            "pending_ca_path": pending_ca_path,
+        }
 
 
 def _browse_script(root: Path) -> str:
@@ -645,6 +973,8 @@ def api_run(body: RunIn) -> dict[str, Any]:
             module, args = "shioaji_wizard.test_ca", (["--futures"] if body.futures else [])
         else:
             raise HTTPException(400, "kind 必須是 a 或 b")
+        # 每次執行先清空檢核單：只留這一次的結果（E1～E3 下次 /api/state 會自然重算回來）。
+        SESSION.clear()
         job = Job(body.kind)
         _job = job
     threading.Thread(target=_run_job, args=(job, module, args), daemon=True).start()
@@ -703,7 +1033,8 @@ def api_open(body: OpenIn) -> None:
     webbrowser.open(body.url)
 
 
-_PERSON_ID_RE = re.compile(r"\b([A-Z][12]\d)\d{5}(\d{2})\b")  # 身分證字號：留頭三尾二
+# 身分證字號／外來人口統一證號（第二碼 8、9 或舊式 A–D）：留頭三尾二
+_PERSON_ID_RE = re.compile(r"\b([A-Z][1289A-D]\d)\d{5}(\d{2})\b")
 
 
 def _secret_values() -> set[str]:
@@ -783,6 +1114,7 @@ def api_export_log() -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         parts.append(f"shioaji：讀不到版本 {type(e).__name__}: {e}")
     parts.append(f"工作資料夾：{ROOT}")
+    parts.append(f"目前帳號 .env：{env_path()}")
     parts.append("")
     parts.append("=== .env（值已遮罩）===")
     parts += _masked_env_lines()

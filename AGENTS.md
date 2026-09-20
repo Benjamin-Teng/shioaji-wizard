@@ -1,4 +1,4 @@
-# CLAUDE.md — shioaji-wizard 開發指引
+# AGENTS.md — shioaji-wizard 開發指引
 
 回應一律台灣慣用繁體中文。本專案獨立於 fcn-pricing（殼與打包流程是從那邊移植
 來的，**不要反向修改 fcn-pricing**）。
@@ -104,3 +104,13 @@ SJ_CA_PASSWD／SJ_CA_PATH）讓 Shioaji Pro／`shioaji server` 直接沿用—�
   `X509Certificate2Collection.Import` 沒有 `SecureString` 多載，傳
   `SecureString` 會變成字面字串當密碼，對正確密碼也回密碼錯——`.NET` 互通一律
   傳明文字串，不要圖「安全」轉 `SecureString`。
+
+## Review 時的驗證指令（唯讀沙箱可跑）
+
+review 沙箱是唯讀的，`uv run` 會因為要寫快取而失敗；要實跑驗證請直接用 venv
+執行檔、關掉所有快取寫入：
+
+```text
+.venv/Scripts/python.exe -B -m pytest tests/ -q -p no:cacheprovider
+.venv/Scripts/ruff.exe check src tools tests --no-cache
+```
