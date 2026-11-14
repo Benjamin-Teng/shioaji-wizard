@@ -6,3 +6,4 @@ dist/
 shioaji.log
 .ruff_cache/
 .qa/
+.kata.local.toml
