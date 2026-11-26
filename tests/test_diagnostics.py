@@ -185,28 +185,30 @@ def test_b_intl_checks_only_intl_signing(selected, intl_signing, expected):
 def test_ca_expiry_classification_uses_earliest_account_and_warns_below_30_days():
     now = datetime(2026, 8, 29, 12, tzinfo=UTC)
 
-    status, reason = test_ca.classify_ca_expirations(
+    status, reason, _warning = test_ca.classify_ca_expirations(
         [now + timedelta(days=90), now + timedelta(days=29, hours=23)], now
     )
 
     assert status == "PASS"
     assert "29 天後" in reason
+    assert _warning == "certificate_expiring"
 
 
 def test_ca_expiry_classification_does_not_warn_at_exactly_30_days():
     now = datetime(2026, 8, 29, 12, tzinfo=UTC)
 
-    status, reason = test_ca.classify_ca_expirations([now + timedelta(days=30)], now)
+    status, reason, _warning = test_ca.classify_ca_expirations([now + timedelta(days=30)], now)
 
     assert status == "PASS"
     assert "建議" not in reason  # 剛好 30 天：不提醒
+    assert _warning == ""
     assert reason == "到期日 2026-09-28（剩 30 天）"  # 但通過也要列出到期日
 
 
 def test_ca_expiry_passing_reason_lists_date_and_days_left():
     now = datetime(2026, 9, 20, 12, tzinfo=UTC)
 
-    status, reason = test_ca.classify_ca_expirations([datetime(2028, 8, 22, 4, tzinfo=UTC)], now)
+    status, reason, _warning = test_ca.classify_ca_expirations([datetime(2028, 8, 22, 4, tzinfo=UTC)], now)
 
     assert status == "PASS"
     assert reason == "到期日 2028-08-22（剩 701 天）"
@@ -218,14 +220,14 @@ def test_ca_expiry_date_is_shown_in_taiwan_time_not_utc():
 
     assert test_ca.tw_date(utc_expiry) == "2028-08-22"
     assert test_ca.tw_date(datetime(2028, 8, 22, 7, 0)) == "2028-08-22"  # naive：原樣
-    _status, reason = test_ca.classify_ca_expirations([utc_expiry], datetime(2028, 8, 22, 0, tzinfo=UTC))
+    _status, reason, _warning = test_ca.classify_ca_expirations([utc_expiry], datetime(2028, 8, 22, 0, tzinfo=UTC))
     assert "2028-08-22" in reason and "過期" in reason
 
 
 def test_ca_expiry_classification_fails_when_already_expired():
     now = datetime(2026, 8, 29, 12, tzinfo=UTC)
 
-    status, reason = test_ca.classify_ca_expirations([now - timedelta(seconds=1)], now)
+    status, reason, _warning = test_ca.classify_ca_expirations([now - timedelta(seconds=1)], now)
 
     assert status == "FAIL"
     assert "已於" in reason
@@ -235,8 +237,9 @@ def test_ca_expiry_classification_fails_when_already_expired():
 def test_ca_expiry_classification_fails_when_person_id_is_unavailable():
     now = datetime(2026, 8, 29, 12, tzinfo=UTC)
 
-    status, reason = test_ca.classify_ca_expirations([], now)
+    status, reason, _warning = test_ca.classify_ca_expirations([], now)
 
+    assert _warning == ""
     assert status == "FAIL"
     assert "person_id" in reason
     assert "無法查詢" in reason
@@ -608,7 +611,7 @@ def test_ca_expiry_classification_handles_mixed_aware_and_naive(order):
     naive = datetime(2028, 8, 22, 6, 0)  # 台灣本地 06:00，比上面早一小時
     exps = [aware, naive] if order == "aware_first" else [naive, aware]
 
-    status, reason = test_ca.classify_ca_expirations(exps, datetime(2026, 9, 20, 12, 0))
+    status, reason, _warning = test_ca.classify_ca_expirations(exps, datetime(2026, 9, 20, 12, 0))
 
     assert status == "PASS"
     assert reason.startswith("到期日 2028-08-22（剩 ")

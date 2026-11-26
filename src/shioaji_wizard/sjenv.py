@@ -151,8 +151,11 @@ class Report:
         self.items: list[dict[str, str]] = []
         self._file = os.environ.get("SJ_REPORT_FILE") or ""
 
-    def add(self, name: str, status: str, reason: str = "") -> None:
-        self.items.append({"name": name, "status": status, "reason": reason})
+    def add(self, name: str, status: str, reason: str = "", *, warning: str = "") -> None:
+        item = {"name": name, "status": status, "reason": reason}
+        if warning:
+            item["warning"] = warning
+        self.items.append(item)
         mark = _MARK[status]
         print(f"  [{name}] {mark}" + (f" — {reason}" if reason else ""))
         if self._file:

@@ -392,6 +392,20 @@ def test_browse_script_forces_utf8_and_owner_window(env_mods, tmp_path: Path):
     assert "o''neil" in ps  # 單引號已跳脫
 
 
+def test_mac_picker_passes_path_as_argument_and_shows_hidden_settings(env_mods, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    _, server = env_mods
+    monkeypatch.setattr(server, "sys", SimpleNamespace(platform="darwin"))
+    folder = tmp_path / "中文 o'neil"
+    folder.mkdir()
+    command = server._picker_command(folder, "settings")
+    assert command[:4] == ["/usr/bin/osascript", "-l", "JavaScript", "-e"]
+    assert "picker.showsHiddenFiles = kind === 'settings'" in command[4]
+    assert str(folder) not in command[4]
+    assert command[5:] == ["settings", str(folder), "選擇現有的 .env"]
+
+
 def test_powershell_roundtrips_chinese_path(env_mods):
     """實際叫 powershell 印中文路徑，伺服器端以 UTF-8 解回來要一字不差（模擬 api_browse 的輸出鏈）。"""
     import shutil
@@ -695,6 +709,40 @@ def test_api_run_clears_session_immediately(env_mods, client, monkeypatch: pytes
     names = [i["name"] for i in client.get("/api/state").json()["summary"]]
     assert "B1 正式環境登入" not in names
     assert any(n.startswith("E1") for n in names)  # E1～E3 由 inspect_env() 當場重算，會自然回來
+
+
+def test_passed_steps_survive_other_tests_and_are_invalidated_by_settings(
+    env_mods, client, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    _, server = env_mods
+    pfx = tmp_path / "Sinopac.pfx"
+    pfx.touch()
+    client.post(
+        "/api/env",
+        json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_passwd": "fake", "ca_path": str(pfx)},
+    )
+    for module, checks in (("fixture_a", ("A1", "A3")), ("fixture_b", ("B1", "B5", "B6"))):
+        (tmp_path / f"{module}.py").write_text(
+            "from shioaji_wizard.sjenv import Report\n"
+            "report = Report()\n"
+            f"for code in {checks!r}:\n    report.add(code + ' fixture', 'PASS')\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    run_job = server._run_job
+    monkeypatch.setattr(server, "_run_job", lambda job, module, args: run_job(job, f"fixture_{job.kind}", []))
+
+    for kind, expected in (("a", ["a"]), ("b", ["a", "b"])):
+        assert client.post("/api/run", json={"kind": kind}).status_code == 200
+        _wait_job_done(server)
+        state = client.get("/api/state").json()
+        assert state["passed_steps"] == expected
+        assert all(row["name"][0] in {"E", kind.upper()} for row in state["summary"])
+
+    assert client.post("/api/env", json={"ca_passwd": "changed"}).status_code == 200
+    assert client.get("/api/state").json()["passed_steps"] == ["a"]
+    assert client.post("/api/env", json={"api_key": "x" * 44, "unlock_keys": True}).status_code == 200
+    assert client.get("/api/state").json()["passed_steps"] == []
 
 
 @pytest.mark.parametrize(("kind", "worker"), [("a", "test_sim_order"), ("b", "test_ca")])

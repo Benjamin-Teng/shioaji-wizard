@@ -62,6 +62,12 @@ _POSIX_CHROMIUM_NAMES = (
     "google-chrome",
 )
 
+_MAC_BROWSER_PATHS = (
+    ("Microsoft Edge.app", "Microsoft Edge"),
+    ("Google Chrome.app", "Google Chrome"),
+    ("Chromium.app", "Chromium"),
+)
+
 
 def find_chromium() -> Path:
     """探測 Chromium 可執行檔。Windows：Edge 優先次 Chrome（標準安裝路徑＋
@@ -102,6 +108,12 @@ def _find_chromium_posix() -> Path:
         if p.exists():
             return p
         raise FileNotFoundError(f"SJW_CHROMIUM_PATH 指向不存在的路徑：{p}")
+    if sys.platform == "darwin":
+        for bundle, executable in _MAC_BROWSER_PATHS:
+            for root in (Path("/Applications"), Path.home() / "Applications"):
+                candidate = root / bundle / "Contents" / "MacOS" / executable
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return candidate
     for name in _POSIX_CHROMIUM_NAMES:
         hit = shutil.which(name)
         if hit:

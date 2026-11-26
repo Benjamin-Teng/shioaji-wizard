@@ -1,0 +1,41 @@
+name: macOS Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/macos-release]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version: "0.11.24"
+      - name: Verify native picker script syntax
+        run: |
+          script="$RUNNER_TEMP/shioaji-picker.js"
+          uv run --locked --python 3.12.13 python -c 'from shioaji_wizard.server import _MAC_PICKER; print(_MAC_PICKER)' > "$script"
+          /usr/bin/osacompile -l JavaScript -o "$RUNNER_TEMP/shioaji-picker.scpt" "$script"
+      - name: Build and check disk image
+        run: uv run --locked --python 3.12.13 python tools/build_macos.py --verify
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shioaji-wizard-macos-${{ matrix.arch }}
+          path: dist/shioaji-wizard-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          compression-level: 0

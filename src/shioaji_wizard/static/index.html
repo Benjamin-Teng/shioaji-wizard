@@ -172,15 +172,17 @@
   .rail .st .seal.PASS{background:var(--pass);color:white}
   .rail .st .t b{font:650 15px/1.4 var(--sans);letter-spacing:0}
   .rail .st .t span{font-size:12px}
-  .wizard .card{padding:clamp(16px,3vw,28px);border-radius:12px;box-shadow:0 12px 28px -24px #162F35}
+  .wizard .card{padding:clamp(14px,2vw,22px);border-radius:12px;box-shadow:0 12px 28px -24px #162F35}
   .wizard .card h2{font:720 24px/1.35 var(--sans);letter-spacing:0;margin:0 0 10px}
-  .lead{margin:0 0 16px;color:var(--muted);font-size:15px}
-  .source-row{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+  .lead{margin:0 0 12px;color:var(--muted);font-size:15px}
+  .source-row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
   .env-location{display:block;overflow-wrap:anywhere;padding:7px 10px;background:var(--paper);border-radius:6px}
-  .section-rule{margin:14px 0;border:0;border-top:1px solid var(--rule)}
+  .section-rule{margin:10px 0;border:0;border-top:1px solid var(--rule)}
   .step-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:15px}
   .guide,.locate{display:inline-grid;place-items:center;gap:0;color:#352800;font-weight:700}
-  button.guide{background:#FFDB4D;border-color:#9A7000;margin-bottom:12px}
+  .step-heading{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .wizard .step-heading h2{margin-bottom:0}
+  button.guide{background:#FFDB4D;border-color:#9A7000}
   button.guide:hover,button.guide:focus-visible{background:#FFE773;border-color:#9A7000}
   button.locate{background:#FF9B21;border-color:#AA5400;color:#351700;min-height:44px}
   button.locate:hover,button.locate:focus-visible{background:#FFB14F;border-color:#AA5400}
@@ -191,7 +193,12 @@
   .note{border-radius:6px;padding:8px 10px;background:var(--warn-bg);color:var(--warn);margin:10px 0}
   .file-dialog{max-width:560px}
   .file-dialog input{margin-top:6px}
-  #guideStatus{min-height:1.5em;color:var(--muted);margin:8px 0}
+  #guideStatus{color:var(--muted);margin:6px 0}
+  #guideStatus:empty,.problems:empty{margin:0}
+  .key-actions{align-items:center}
+  .key-actions #saveMsg{color:var(--muted);font-size:13px}
+  .key-actions #saveMsg:empty{display:none}
+  .key-actions #nextA{margin-inline-start:auto}
   .test-options label span small{line-height:1.35}
   details.card summary{font-weight:650;cursor:pointer}
   @media(max-width:740px){
@@ -220,8 +227,10 @@
   </nav>
   <div class="workspace">
     <section class="card" id="step1" aria-labelledby="title1">
-      <button type="button" class="guide" data-open="https://sinotrade.github.io/zh/tutor/prepare/open_account/" aria-label="還沒有api key嗎? 前往申請教學"><span class="rest-copy" aria-hidden="true">還沒有api key嗎?</span><span class="hover-copy" aria-hidden="true">前往申請教學</span></button>
-      <h2 id="title1" tabindex="-1">設定金鑰</h2>
+      <div class="step-heading">
+        <h2 id="title1" tabindex="-1">設定金鑰</h2>
+        <button type="button" class="guide" data-open="https://sinotrade.github.io/zh/tutor/prepare/open_account/" aria-label="還沒有api key嗎? 前往申請教學"><span class="rest-copy" aria-hidden="true">還沒有api key嗎?</span><span class="hover-copy" aria-hidden="true">前往申請教學</span></button>
+      </div>
       <p class="lead">選擇要使用的 <code>.env</code>。這一步只需 API Key 與 Secret Key。</p>
       <p class="note hidden" id="setupDefault"></p>
       <div class="source-row" aria-label="設定檔位置">
@@ -235,13 +244,15 @@
       <hr class="section-rule">
       <div class="f"><label for="apiKey"><span class="setmark" id="mkApi"></span>API Key</label><input type="text" id="apiKey" autocomplete="off" spellcheck="false"></div>
       <div class="f"><label for="secKey"><span class="setmark" id="mkSec"></span>Secret Key</label><div class="inline"><input type="password" id="secKey" autocomplete="new-password"><button type="button" class="unlock hidden" id="btnUnlock" title="金鑰已驗證通過並鎖定；只有要更換金鑰時才需要解鎖">解鎖修改</button></div></div>
-      <p class="note">建立好金鑰後，先別關閉永豐顯示 Secret Key 的頁面。確認已複製並妥善儲存後再關閉。</p>
-      <p class="lead">到 <a href="#" data-open="https://www.sinotrade.com.tw/newweb/PythonAPIKey/">永豐金證券 API 管理頁</a> 申請金鑰。已儲存的欄位可留空。</p>
-      <div class="savebar"><button class="act" id="btnSave">儲存金鑰</button><span class="msg" id="saveMsg" role="status"></span></div>
+      <p class="note" id="secretNote">在<a href="#" data-open="https://www.sinotrade.com.tw/newweb/PythonAPIKey/">永豐金證券 API 管理頁</a>建立金鑰後，請先儲存 Secret Key 再關閉顯示金鑰的頁面。</p>
       </div>
       <div class="f" id="acctRow"><label>帳號</label><div class="hint" id="acctList"></div></div>
       <ul class="problems" id="problems"></ul>
-      <div class="step-actions"><button type="button" class="act" data-next="2" id="nextA" disabled>前往模擬下單</button></div>
+      <div class="step-actions key-actions">
+        <button type="button" id="btnSave" class="hidden">儲存金鑰</button>
+        <span id="saveMsg" role="status"></span>
+        <button type="button" class="act" data-next="2" id="nextA" disabled>前往模擬下單</button>
+      </div>
     </section>
 
     <section class="card hidden" id="step2" aria-labelledby="title2">
@@ -266,10 +277,11 @@
         <p>登入正式環境，檢查帳戶簽署狀態、憑證啟用與到期日。<b>只查詢、不下單。</b></p>
         <p>需要已勾選「正式環境」的 API Key、憑證檔與憑證密碼。</p>
         <div class="f"><label for="caPwd"><span class="setmark" id="mkPwd"></span>憑證密碼</label>
-          <div class="inline"><input type="password" id="caPwd" autocomplete="new-password"><label class="chk"><input type="checkbox" id="clearPwd"> 清除</label></div></div>
+          <div class="inline"><input type="password" id="caPwd" autocomplete="new-password" placeholder="預設為身分證字號（首字母大寫）"><label class="chk"><input type="checkbox" id="clearPwd"> 清除</label></div></div>
         <div class="f"><label for="caPath"><span class="setmark" id="mkPath"></span>憑證檔</label>
           <div class="inline"><input type="text" id="caPath" spellcheck="false"><button id="btnBrowse">瀏覽…</button><span id="pfxState" style="white-space:nowrap"></span></div></div>
         <div class="savebar"><button type="button" id="btnSaveCA">儲存憑證設定</button><span class="msg" id="caMsg" role="status"></span></div>
+        <ul class="problems" id="caProblems"></ul>
         <fieldset class="test-options">
           <legend>加查帳戶</legend>
           <label><input type="checkbox" id="futuresB">期貨／選擇權</label>
@@ -313,6 +325,14 @@
   </div>
 </dialog>
 
+<dialog id="expiryNotice" class="file-dialog" aria-labelledby="expiryTitle" aria-describedby="expiryMessage">
+  <div class="dh"><h2 id="expiryTitle">憑證即將到期</h2></div>
+  <div class="db">
+    <p id="expiryMessage"></p>
+    <form method="dialog"><button class="act" autofocus>知道了</button></form>
+  </div>
+</dialog>
+
 <dialog id="help" aria-labelledby="helpTitle">
   <div class="dh"><h2 id="helpTitle">使用說明</h2><button id="btnHelpClose">關閉</button></div>
   <div class="db">
@@ -320,7 +340,7 @@
     <ol class="help-steps">
       <li>
         <h3>設定金鑰</h3>
-        <p>有設定檔就選「開啟現有 .env」。第一次使用可在預設位置建立，或自選資料夾。偵測到 eKey 時會優先使用憑證所在資料夾，其他情況預設為 <code>%USERPROFILE%\.shioaji-pro</code>。</p>
+        <p>有設定檔就選「開啟現有 .env」。第一次使用可在預設位置建立，或自選資料夾。偵測到 eKey 時會優先使用憑證所在資料夾，其他情況預設為使用者家目錄下的 <code>.shioaji-pro</code>。</p>
         <p>還沒有金鑰，可先看<a href="#" data-open="https://sinotrade.github.io/zh/tutor/prepare/open_account/">永豐開戶與申請教學</a>。在永豐建立金鑰後，先保留顯示 Secret Key 的頁面，等兩組金鑰都填好並妥善儲存再關閉。</p>
       </li>
       <li>
@@ -330,7 +350,7 @@
       </li>
       <li>
         <h3>正式環境驗證</h3>
-        <p>使用已開啟「正式環境」權限的 API Key。輸入下載憑證時設定的密碼，按「瀏覽…」選取憑證，再按「儲存憑證設定」。按「執行 B 正式憑證測試」檢查憑證和帳戶簽署狀態，也可加查期貨／選擇權或美股複委託。這一步只查詢帳戶和憑證。</p>
+        <p>使用已開啟「正式環境」權限的 API Key。憑證密碼預設為身分證字號（首字母大寫），曾改過請用新密碼。按「瀏覽…」選取憑證，再按「儲存憑證設定」及「執行 B 正式憑證測試」。可加查期貨／選擇權或美股複委託。</p>
       </li>
       <li>
         <h3>體驗 Shioaji Pro</h3>
@@ -370,7 +390,7 @@
       <summary>換電腦與回報問題</summary>
       <ul>
         <li>換電腦時，先安裝精靈，再透過安全方式搬移設定檔與憑證，或重新設定。若憑證路徑不同，在「正式環境驗證」重新選檔。</li>
-        <li>App 視窗開不起來時，確認 Windows 有可用的 Microsoft Edge 或 Google Chrome。</li>
+        <li>App 視窗開不起來時，確認系統有可用的瀏覽器。Windows 與 macOS 可使用 Microsoft Edge 或 Google Chrome 開啟獨立視窗。</li>
         <li>回報問題時，按右上「匯出除錯紀錄」。精靈會開啟檔案位置。紀錄會遮罩金鑰與憑證密碼，分享前請先檢查內容。</li>
       </ul>
     </details>
@@ -390,7 +410,8 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const S = { step:1, items:[], envPath:"", choosing:false, running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, windowWarnings:[], lastStatus:{}, profiles:[], caPathDirty:false };
+  const caPasswordHint = $("caPwd").placeholder;
+  const S = { step:1, items:[], passedSteps:new Set(), envPath:"", choosing:false, running:false, kind:"", since:0, okA:false, okB:false, pollTimer:null, windowGood:true, windowWarnings:[], lastStatus:{}, profiles:[], caPathDirty:false };
   const MARK = {PASS:"✓ 通過", FAIL:"✗ 未通過", SKIP:"－ 未測", UNKNOWN:"？待確認"};
 
   const api = async (path, opts={}) => {
@@ -452,11 +473,10 @@
   }
 
   function railState(prefix, items){
+    if (S.passedSteps.has(prefix.toLowerCase())) return "PASS";
     const mine = items.filter(i => i.name.startsWith(prefix));
-    if (!mine.length) return "";
     if (mine.some(i => i.status === "FAIL")) return "FAIL";
     if (mine.some(i => i.status === "UNKNOWN")) return "UNKNOWN";
-    if (mine.some(i => i.status === "PASS")) return "PASS";
     return "";
   }
   // 欄位前的標記：已儲存＝綠勾；最近一次 A/B 卡在該欄＝紅叉（依檢核單原因對應欄位）；
@@ -494,7 +514,7 @@
   }
   function updateMarks(){
     const e = S.env || {}; const bad = failedFields(S.items); const good = verifiedFields(S.items);
-    const failLi = [];
+    const failLi = [], caFailLi = [];
     const set = (id, key, saved) => {
       const m = $(id);
       // 按了「解鎖修改」→ 金鑰兩欄視為未知（不知道使用者動了沒），✓／✗ 都先拿掉，儲存或下次測試再判
@@ -516,7 +536,10 @@
         if (isBad) inp.placeholder = "已儲存，但上次測試在這裡失敗 — 請重新填寫後儲存";
         else if (inp.placeholder.startsWith("已儲存，但")) inp.placeholder = saved ? "已儲存 — 留空保留" : "";
       }
-      if (isBad) failLi.push(`${FIELD_LABEL[key]}有問題：${bad.get(key) || "最近一次測試在此失敗"}`);
+      if (isBad){
+        const warnings = key === "pwd" || key === "path" ? caFailLi : failLi;
+        warnings.push(`${FIELD_LABEL[key]}有問題：${bad.get(key) || "最近一次測試在此失敗"}`);
+      }
     };
     set("mkApi", "api", !!e.api_key_masked);
     set("mkSec", "sec", !!e.sec_key_set);
@@ -531,10 +554,13 @@
       if (lock){ inp.value = ""; inp.placeholder = id === "apiKey" ? `已驗證通過 ${e.api_key_masked}（已鎖定）` : "已驗證通過（已鎖定）"; }
     }
     $("btnUnlock").classList.toggle("hidden", !(S.keysLocked && !S.unlockKeys));  // force 必須是 boolean，undefined 會變成「翻轉」
+    $("secretNote").classList.toggle("hidden", Boolean(e.ok_a && !S.unlockKeys && !$("apiKey").value && !$("secKey").value));
     const ul = $("problems");
     const keyBad = (bad.has("api") && !S.cleared.has("api")) || (bad.has("sec") && !S.cleared.has("sec"));
     const envLi = (S.envLi || []).filter(([c]) => !(keyBad && c === "ok")).map(([c,t]) => `<li class="${c}">${esc(t)}</li>`);  // 金鑰被標紅時不再同時說「可以執行 A」
     ul.innerHTML = envLi.concat(failLi.map(t => `<li class="bad">${esc(t)}</li>`)).join("");
+    const caLi = S.caLi || [];
+    $("caProblems").innerHTML = caLi.map(t => `<li>${esc(t)}</li>`).concat(caFailLi.map(t => `<li class="bad">${esc(t)}</li>`)).join("");
   }
   function renderRail(items){
     const setSeal = (id, st, textId, text) => { const el = $(id); el.className = "seal " + (st||""); if (text) $(textId).textContent = text; };
@@ -548,8 +574,7 @@
     setSeal("sealB", S.running && S.kind==="b" ? "RUN" : b, "railB", b==="PASS" ? "憑證檢核通過" : b==="FAIL" ? "未通過，看檢核結果" : "檢查正式環境與憑證");
   }
   function canExperiencePro(){
-    const passed = code => S.items.some(i => i.name.startsWith(code) && i.status==="PASS");
-    return !S.running && railState("B", S.items)==="PASS" && ["B1","B5","B6"].every(passed);
+    return !S.running && S.okB && S.passedSteps.has("b");
   }
   function showStep(step, focus=true){
     if (step===4 && !canExperiencePro()) return;
@@ -585,13 +610,14 @@
 
   function applyState(st){
     const e = st.env;
+    S.passedSteps = new Set(st.passed_steps || []);
     S.envPath = st.env_path || "";
     $("root").textContent = maskId(S.envPath);
     const showKeys = Boolean(e.exists || st.setup_selected || st.pfx_auto_adopted || S.selectedSource);
     $("root").classList.toggle("hidden", !showKeys);
     $("keyFields").classList.toggle("hidden", !showKeys);
     const preferred = $("setupDefault");
-    preferred.classList.toggle("hidden", !st.setup_default_kind);
+    preferred.classList.toggle("hidden", !st.setup_default_kind || Boolean(e.ok_a));
     preferred.textContent = st.setup_default_kind==="ekey-choice" ? "已偵測到多組 eKey 憑證。按「在預設位置建立」可選擇要使用的憑證資料夾。"
       : (st.setup_default_kind==="ekey" ? "已偵測到 eKey 憑證。新建設定檔預設放在憑證所在資料夾 " : "新建設定檔預設位置 ") + maskId(st.setup_default_path || "");
     const b = $("cloudBanner");
@@ -600,7 +626,7 @@
     renderAccounts(st);  // 偵測到的 eLeader 憑證常駐清單：不因為套用過就消失
     $("apiKey").placeholder = e.api_key_masked ? `已儲存 ${e.api_key_masked} — 留空保留` : "尚未填：貼上 API Key";
     $("secKey").placeholder = e.sec_key_set ? `已儲存（${e.sec_key_len} 字）— 留空保留` : "尚未填：貼上 Secret Key";
-    $("caPwd").placeholder = e.ca_passwd_set ? `已儲存（${e.ca_passwd_len} 字）— 留空保留` : "尚未填：下載憑證時設定的密碼（只跑 A 可先空）";
+    $("caPwd").placeholder = e.ca_passwd_set ? `已儲存（${e.ca_passwd_len} 字）— 留空保留` : caPasswordHint;
     // 憑證檔欄預設留空（placeholder 說明預設位置）；只有使用者自訂過路徑才顯示。
     // S.caPathDirty＝使用者輸入了尚未儲存的值（或剛透過切換帳號／瀏覽選檔帶入）：refresh／輪詢不可覆寫。
     if (!S.caPathDirty && document.activeElement !== $("caPath")) $("caPath").value = e.ca_path_custom ? (e.ca_path || "") : "";
@@ -615,17 +641,15 @@
       if (p){ $("caPath").value = p.pfx; S.caPathDirty = !e.exists; maybeAutofillPassword(p.dir, e); }
       $("saveMsg").textContent = e.exists ? "已自動切到唯一的 eLeader 憑證帳號並沿用該帳號設定" : "已自動切到唯一的 eLeader 憑證帳號，請填入金鑰後按「儲存金鑰」";
     }
-    const li = [];
+    const li = [], caLi = [];
     if (e.decode_error){ li.push(['bad', '.env 不是 UTF-8 編碼，讀不出來。重新填入金鑰按「儲存金鑰」會覆寫它；或刪掉 .env 再重開。']); }
     else {
-      if (!e.exists && showKeys) li.push(['', '填入 API Key 與 Secret Key，按「儲存金鑰」建立 .env。']);
       if (e.exists) (e.problems||[]).forEach(p => li.push(['', p]));
-      if (e.exists && e.ok_a && !(e.problems||[]).length) li.push(['ok', '金鑰格式正確，可以執行 A。']);
-      if (e.exists && e.ok_a && e.ca_passwd_set && e.pfx_exists) li.push(['ok', '憑證密碼與憑證檔已儲存，可以執行 B。']);
-      if (e.exists && !e.ca_passwd_set) li.push(['', '沒有憑證密碼：B 不能跑（A 不受影響）。']);
-      if (e.exists && !e.pfx_exists) li.push(['', `找不到憑證檔 ${e.pfx_resolved}：B 不能跑（只跑 A 可忽略）。`]);
+      if (e.exists && !e.pfx_exists) caLi.push(`找不到憑證檔 ${maskId(e.pfx_resolved)}，請按「瀏覽…」選取。`);
     }
     S.envLi = li;
+    S.caLi = caLi;
+    $("btnSave").classList.toggle("hidden", !showKeys);
     S.okA = !!e.ok_a; S.okB = !!e.ok_b;
     updateButtons();
     document.title = `Shioaji 測試精靈${st.version && st.version!=="dev" ? " v"+st.version : ""}`;
@@ -634,6 +658,7 @@
     const busy = S.running;
     $("btnA").disabled = busy || !S.okA; $("btnB").disabled = busy || !S.okB;
     $("nextA").disabled = !S.okA;
+    $("btnSave").classList.toggle("act", !S.okA);
     $("locateEnv").classList.toggle("hidden", !S.okA || !S.envPath);
     $("navPro").disabled = !canExperiencePro();
     $("nextPro").classList.toggle("hidden", $("navPro").disabled);
@@ -671,6 +696,11 @@
         $("log").textContent += `\n${S.resultText}\n`;
         $("log").scrollTop = $("log").scrollHeight;
         await refresh();
+        const expiry = j.report?.find(item => item.name.startsWith("B6") && item.warning === "certificate_expiring");
+        if (expiry){
+          $("expiryMessage").textContent = expiry.reason;
+          $("expiryNotice").showModal();
+        }
       } catch (err){ $("log").textContent += "\n（讀取進度失敗：" + err.message + "，重試中）\n"; S.pollTimer = setTimeout(tick, 1500); }
     };
     S.pollTimer = setTimeout(tick, 300);
@@ -702,6 +732,7 @@
       await api("/api/env", {method:"POST", body: JSON.stringify(body)});
       if (which==="keys"){
         $("apiKey").value=""; $("secKey").value=""; S.unlockKeys=false;
+        $("guideStatus").textContent = "";
       } else {
         $("caPwd").value=""; $("clearPwd").checked=false; S.caPathDirty=false;
       }
@@ -735,7 +766,7 @@
       $("clearPwd").checked = false;
       await refresh();
       $("guideStatus").textContent = S.env?.exists ? "已選取設定檔。" : "請填入金鑰，再儲存設定檔。";
-      if (S.env?.exists){ $("nextA").focus(); } else { $("apiKey").focus(); }
+      if (S.env?.ok_a){ $("nextA").focus(); } else { $("apiKey").focus(); }
     } catch (err){ $("guideStatus").textContent = err.message; }
     finally { S.choosing = false; updateButtons(); }
   }

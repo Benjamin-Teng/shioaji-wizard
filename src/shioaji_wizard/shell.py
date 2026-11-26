@@ -94,7 +94,10 @@ def launch(
         "--disable-extensions",
         "--disable-sync",
     ]
-    if window_size is not None:
+    if sys.platform == "win32":
+        # 由 Windows 按螢幕工作區與縮放設定最大化，保留標題列與工作列。
+        cmd.append("--start-maximized")
+    elif window_size is not None:
         # 殼每次都用全新暫時 profile（見上），Chromium 自己記不住視窗大小，
         # 沒設定就不塞，交給 Chromium 預設——不要自作主張決定一個尺寸。
         cmd.append(f"--window-size={window_size[0]},{window_size[1]}")
@@ -399,6 +402,8 @@ def _user32() -> Any:
     u.GetClassNameW.restype = ctypes.c_int
     u.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
     u.GetWindowTextLengthW.restype = ctypes.c_int
+    u.ShowWindowAsync.argtypes = (wintypes.HWND, ctypes.c_int)
+    u.ShowWindowAsync.restype = wintypes.BOOL
     return u
 
 
@@ -584,6 +589,7 @@ def brand_window(
     pid: int,
     *,
     timeout: float = 5.0,
+    maximize: bool = False,
     find_hwnd: Callable[..., int | None] = _find_main_hwnd,
     set_props: Callable[[int, dict[int, str]], None] = _set_window_properties,
 ) -> bool:
@@ -596,6 +602,9 @@ def brand_window(
     hwnd = find_hwnd(pid, timeout=timeout)
     if hwnd is None:
         return False
+    if maximize:
+        # 某些 Edge 組態會忽略 --app 搭配的 --start-maximized。
+        _user32().ShowWindowAsync(hwnd, 3)  # SW_MAXIMIZE
     try:
         set_props(
             hwnd,

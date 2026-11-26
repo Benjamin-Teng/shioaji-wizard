@@ -126,18 +126,19 @@ def as_tw(dt: datetime) -> datetime:
     return dt.replace(tzinfo=_TW_TZ) if dt.tzinfo is None else dt.astimezone(_TW_TZ)
 
 
-def classify_ca_expirations(expirations: list[datetime], now: datetime) -> tuple[str, str]:
+def classify_ca_expirations(expirations: list[datetime], now: datetime) -> tuple[str, str, str]:
     """以所有帳戶中最早到期的憑證判定結果；通過時也在說明列出到期日與剩餘天數。"""
     if not expirations:
-        return FAIL, "帳戶沒有 person_id，無法查詢憑證到期日"
+        return FAIL, "帳戶沒有 person_id，無法查詢憑證到期日", ""
     earliest = min(as_tw(e) for e in expirations)
     now = as_tw(now)
     left = (earliest - now).days
     if earliest < now:
-        return FAIL, f"憑證已於 {tw_date(earliest)} 過期，請到 API 管理頁重新下載"
+        return FAIL, f"憑證已於 {tw_date(earliest)} 過期，請到 API 管理頁重新下載", ""
     if left < 30:
-        return PASS, f"憑證 {left} 天後（{tw_date(earliest)}）到期，建議儘早到 API 管理頁重新下載"
-    return PASS, f"到期日 {tw_date(earliest)}（剩 {left} 天）"
+        when = "剩不到 1 天" if left == 0 else f"{left} 天後"
+        return PASS, f"憑證 {when}（{tw_date(earliest)}）到期，建議儘早到 API 管理頁重新下載", "certificate_expiring"
+    return PASS, f"到期日 {tw_date(earliest)}（剩 {left} 天）", ""
 
 
 def mask_taiwan_id(id_no: str) -> str:
@@ -213,8 +214,8 @@ def _check_offline_pfx(rep: Report, ca_path: Path, ca_passwd: str) -> tuple[cert
             return None, True
         return None, False  # unavailable：不代表憑證有問題，交給後面的線上路徑
 
-    status, reason = classify_ca_expirations([cert.not_after], datetime.now(cert.not_after.tzinfo))
-    (rep.fail if status == FAIL else rep.ok)(B_EXPIRE, reason)
+    status, reason, warning = classify_ca_expirations([cert.not_after], datetime.now(cert.not_after.tzinfo))
+    rep.add(B_EXPIRE, status, reason, warning=warning)
     return cert, True
 
 
@@ -323,7 +324,7 @@ def main() -> int:
         if not expire_settled:
             pids = sorted({a.person_id for a in api.list_accounts() if a.person_id})
             if not pids:
-                _status, reason = classify_ca_expirations([], datetime.now())
+                _status, reason, _warning = classify_ca_expirations([], datetime.now())
                 rep.fail(B_EXPIRE, reason)
             else:
                 expirations = []
@@ -345,8 +346,8 @@ def main() -> int:
                     )
                     expirations.append(exp)
                 if not failed and expirations:
-                    status, reason = classify_ca_expirations(expirations, datetime.now(_TW_TZ))
-                    (rep.fail if status == FAIL else rep.ok)(B_EXPIRE, reason)
+                    status, reason, warning = classify_ca_expirations(expirations, datetime.now(_TW_TZ))
+                    rep.add(B_EXPIRE, status, reason, warning=warning)
         return 0 if rep.all_passed else 1
     finally:
         if logged_in:

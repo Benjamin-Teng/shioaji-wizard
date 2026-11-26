@@ -1,13 +1,17 @@
 # shioaji-wizard
 
 > **一般使用者請到下載頁：<https://benjamin-teng.github.io/shioaji-wizard/>**
-> （下載並執行 Windows 安裝程式，免裝 Python）。以下為開發文件。
+> （提供 Windows 安裝程式與 macOS 磁碟映像，免裝 Python）。以下為開發文件。
 
 永豐 Shioaji 開通測試精靈是本機桌面工具，依序引導使用者設定金鑰、模擬下單、
 驗證正式環境與體驗 Shioaji Pro。設定檔 `.env` 可由 Shioaji Pro 直接載入。
 
 ## 畫面行為
 
+- **桌面視窗**：Windows 啟動時依螢幕工作區最大化。設定金鑰的主要按鈕移到同一列，
+  正式環境的憑證提示集中在第三步。
+- **步驟進度**：同一次開啟中，各測試的通過狀態保留在左側。切換設定檔或修改金鑰
+  會重新驗證。只變更憑證時，模擬下單的通過狀態保留。
 - **美股複委託模擬測試**（Shioaji 1.8.0）：在 A 的「加測市場」勾選「美股複委託」。
   這組 API Key 需要勾選複委託帳戶及交易權限。A6 檢查帳戶，A7 送出 AAPL 1 股、
   180.25 美元的模擬限價買單，有收到接受回報才算通過。若補查後仍顯示「待確認」，
@@ -109,3 +113,17 @@ uv run python tools/build_bundle.py --verify --makensis <makensis.exe 的絕對�
 - 升級與移除依照出貨清單清理程式檔。設定檔、憑證和工作資料可保留。
 - `--verify` 在隔離目錄測試安裝、啟動、本機 API、SDK 版本、重裝與解除安裝。
 - `--zip` 可另建開發驗收用的可攜壓縮檔。
+
+## macOS 安裝檔
+
+分別在 Apple 晶片和 Intel 的 macOS 建置並驗證：
+
+```bash
+uv run --locked --python 3.12.13 python tools/build_macos.py --verify
+```
+
+- 下載對應晶片的 `.dmg`，將 Shioaji 測試精靈拖到「應用程式」。
+- 執行資料在 `~/Library/Application Support/ShioajiWizard`。新建設定檔預設在
+  `~/.shioaji-pro/.env`。
+- 首次開啟若被 macOS 攔下，請確認檔案來源與校驗碼，再依 Apple 的
+  [開啟安全性設定](https://support.apple.com/zh-tw/102445)操作。

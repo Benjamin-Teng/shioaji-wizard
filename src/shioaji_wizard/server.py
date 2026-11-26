@@ -40,6 +40,7 @@ from shioaji_wizard.sjenv import (
     FAIL,
     OPTIONAL_KEYS,
     PASS,
+    SKIP,
     REQUIRED_KEYS,
     ROOT,
     RUNTIME,
@@ -69,6 +70,8 @@ install_guards(app)  # Host／Origin 防線在 app 建構時就掛上，任何�
 
 # ---------------------------------------------------------------- 狀態
 SESSION: dict[str, dict[str, str]] = {}  # name -> {name,status,reason}
+_PASSED_STEPS: set[str] = set()  # 同一帳號本次開啟中已通過的測試步驟
+_REQUIRED_CHECKS = {"a": {"A1", "A3"}, "b": {"B1", "B5", "B6"}}
 _lock = threading.Lock()
 _last_heartbeat = time.monotonic()
 
@@ -233,20 +236,24 @@ def _setup_default(candidates: list[str]) -> tuple[Path | None, str]:
     return _setup_home() / ".shioaji-pro", "home"
 
 
-def _snapshot_profile_state() -> tuple[Path, bool, dict[str, dict[str, str]], set[str]]:
-    """切換前拍照（只有記憶體狀態）：目前 profile 目錄、SESSION、_STALE_FIELDS。"""
-    return _profile_dir, _setup_selected, dict(SESSION), set(_STALE_FIELDS)
+type _ProfileSnapshot = tuple[Path, bool, dict[str, dict[str, str]], set[str], set[str]]
 
 
-def _restore_profile_state(snapshot: tuple[Path, bool, dict[str, dict[str, str]], set[str]]) -> None:
+def _snapshot_profile_state() -> _ProfileSnapshot:
+    return _profile_dir, _setup_selected, dict(SESSION), set(_STALE_FIELDS), set(_PASSED_STEPS)
+
+
+def _restore_profile_state(snapshot: _ProfileSnapshot) -> None:
     """切換失敗時退回切換前。active-profile 一律「最後才提交」，失敗路徑上磁碟紀錄
     從沒被動過，所以這裡只需要還原記憶體——不存在「回滾持久化又失敗」的雙重故障。"""
     global _profile_dir, _setup_selected
-    _profile_dir, _setup_selected, prev_session, prev_stale = snapshot
+    _profile_dir, _setup_selected, prev_session, prev_stale, prev_passed = snapshot
     SESSION.clear()
     SESSION.update(prev_session)
     _STALE_FIELDS.clear()
     _STALE_FIELDS.update(prev_stale)
+    _PASSED_STEPS.clear()
+    _PASSED_STEPS.update(prev_passed)
 
 
 def _enter_profile_dir(target_dir: Path, *, selected: bool = False) -> None:
@@ -257,6 +264,7 @@ def _enter_profile_dir(target_dir: Path, *, selected: bool = False) -> None:
     _profile_dir = target_dir
     _setup_selected = selected
     SESSION.clear()
+    _PASSED_STEPS.clear()
     _STALE_FIELDS.clear()
     _STALE_FIELDS.update({"api", "sec", "pwd", "path"})
 
@@ -467,6 +475,7 @@ def auto_adopt_eleader_pfx(env: dict[str, Any], candidates: list[str]) -> bool:
         except OSError:
             return False
         _STALE_FIELDS.add("path")
+        _PASSED_STEPS.discard("b")
         return True
     try:
         _switch_to_pfx(candidate)
@@ -703,9 +712,15 @@ def _run_job(job: Job, module: str, args: list[str]) -> None:
                     FAIL,
                     f"腳本異常結束（代碼 {rc}），沒有留下測試結果；請看輸出訊息",
                 )
-        if not timeout_reason:
-            _STALE_FIELDS.difference_update(_COVERS.get(job.kind, set()))
-        job.rc = rc if not timeout_reason else (rc or 124)
+            if not timeout_reason:
+                _STALE_FIELDS.difference_update(_COVERS.get(job.kind, set()))
+            job.rc = rc if not timeout_reason else (rc or 124)
+            if job.rc == 0:
+                passed = {item["name"][:2] for item in job.report if item["status"] == PASS}
+                if _REQUIRED_CHECKS[job.kind] <= passed and all(
+                    item["status"] in {PASS, SKIP} for item in job.report
+                ):
+                    _PASSED_STEPS.add(job.kind)
 
 
 def cancel_job() -> bool:
@@ -779,6 +794,7 @@ def api_state() -> dict[str, Any]:
             "env": env,
             "job": {"running": bool(_job and _job.running), "kind": _job.kind if _job else ""},
             "summary": summary_items(),
+            "passed_steps": sorted(_PASSED_STEPS),
             "platform": sys.platform,
             "version": APP_VERSION,
             "stale": sorted(_STALE_FIELDS),
@@ -848,16 +864,17 @@ def api_env(body: EnvIn) -> dict[str, Any]:
         if ca_path_provided:
             updates["SJ_CA_PATH"] = Path(cap).expanduser().as_posix() if cap else default_pfx.as_posix()
         prev_values, _ = parse_env_text(read_env_text() or "")
+        changed_fields: set[str] = set()
         if "SJ_API_KEY" in updates and updates["SJ_API_KEY"] != prev_values.get("SJ_API_KEY"):
-            _STALE_FIELDS.add("api")
+            changed_fields.add("api")
         if "SJ_SEC_KEY" in updates and updates["SJ_SEC_KEY"] != prev_values.get("SJ_SEC_KEY"):
-            _STALE_FIELDS.add("sec")
+            changed_fields.add("sec")
         if "SJ_CA_PASSWD" in updates and updates["SJ_CA_PASSWD"] != prev_values.get("SJ_CA_PASSWD", ""):
-            _STALE_FIELDS.add("pwd")
+            changed_fields.add("pwd")
         if "SJ_CA_PATH" in updates and updates["SJ_CA_PATH"] != (
             prev_values.get("SJ_CA_PATH") or default_pfx.as_posix()
         ):
-            _STALE_FIELDS.add("path")
+            changed_fields.add("path")
         if not env_path().is_file():
             # 第一次建立：四鍵都寫，沒給的原則上留空——除非這是從 ROOT 搬過來的同一張憑證
             # （migrating_from_root），這種情況沒給的欄位沿用 ROOT 原值。
@@ -883,6 +900,8 @@ def api_env(body: EnvIn) -> dict[str, Any]:
         except OSError as e:
             _restore_profile_state(snapshot)  # 含這次才加的 stale 標記一併退回
             raise HTTPException(500, f"寫入設定失敗（{target_env}）：{e}") from e
+        _STALE_FIELDS.update(changed_fields)
+        _PASSED_STEPS.difference_update(kind for kind, fields in _COVERS.items() if fields & changed_fields)
         env = inspect_env()
         return {
             "ok": True,
@@ -976,6 +995,46 @@ def api_setup_source(body: SetupSourceIn) -> dict[str, Any]:
 
 _PickerKind = Literal["certificate", "settings", "directory"]
 
+_MAC_PICKER = """
+ObjC.import('AppKit');
+function run(argv) {
+  const [kind, root, title] = argv;
+  const app = $.NSApplication.sharedApplication;
+  app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
+  app.activateIgnoringOtherApps(true);
+  const picker = $.NSOpenPanel.openPanel;
+  picker.level = $.NSFloatingWindowLevel;
+  picker.title = title;
+  picker.directoryURL = $.NSURL.fileURLWithPath(root);
+  picker.canChooseDirectories = kind === 'directory';
+  picker.canChooseFiles = kind !== 'directory';
+  picker.showsHiddenFiles = kind === 'settings';
+  return picker.runModal === $.NSModalResponseOK ? ObjC.unwrap(picker.URL.path) : '';
+}
+"""
+
+
+def _picker_command(root: Path, kind: _PickerKind) -> list[str]:
+    if sys.platform == "win32":
+        return [
+            str(_POWERSHELL),
+            "-NoProfile",
+            "-STA",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            _browse_script(root, kind),
+        ]
+    if sys.platform == "darwin":
+        title = {
+            "certificate": "選擇永豐憑證 Sinopac.pfx",
+            "settings": "選擇現有的 .env",
+            "directory": "選擇放置 .env 的資料夾",
+        }[kind]
+        start = root if root.is_dir() else Path.home()
+        return ["/usr/bin/osascript", "-l", "JavaScript", "-e", _MAC_PICKER, kind, str(start), title]
+    raise HTTPException(400, "此平台沒有內建檔案對話框")
+
 
 def _browse_script(root: Path, kind: _PickerKind = "certificate") -> str:
     """組 PowerShell 選檔腳本。兩個不能少：
@@ -1021,8 +1080,9 @@ def _browse_script(root: Path, kind: _PickerKind = "certificate") -> str:
 
 @app.post("/api/browse")
 def api_browse() -> dict[str, Any]:
+    start = env_path().parent if sys.platform == "darwin" else ROOT
     try:
-        return {"path": _show_native_picker(ROOT, "certificate")}
+        return {"path": _show_native_picker(start, "certificate")}
     except HTTPException as e:
         return {"path": None, "error": e.detail}
 
@@ -1037,24 +1097,23 @@ def _pick_setup_path(kind: _PickerKind, root: Path) -> Path | None:
 
 
 def _show_native_picker(root: Path, kind: _PickerKind) -> str | None:
-    if sys.platform != "win32":
-        raise HTTPException(400, "此平台沒有內建檔案對話框")
+    command = _picker_command(root, kind)
     if not _dialog_lock.acquire(blocking=False):
         raise HTTPException(409, "已有檔案選擇器開啟")
     try:
-        return _run_native_picker(_browse_script(root, kind))
+        return _run_native_picker(command)
     finally:
         _dialog_lock.release()
 
 
-def _run_native_picker(ps: str) -> str | None:
+def _run_native_picker(command: list[str]) -> str | None:
     # 對話框由背景行程開，沒有 owner 會被壓在 app 視窗後面、工作列也沒項目（使用者以為沒按到）。
     # 做法：先開一個 TopMost、會出現在工作列、幾乎透明的小 owner 視窗並 Activate，再以它為 owner
     # 開 OpenFileDialog → 對話框跟著浮到最前面，工作列也看得到「選擇憑證」。
     global _dialog_proc
     try:
         proc = subprocess.Popen(
-            [str(_POWERSHELL), "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", ps],
+            command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -1074,7 +1133,9 @@ def _run_native_picker(ps: str) -> str | None:
         raise HTTPException(408, "選檔視窗逾時未關閉，已取消") from e
     finally:
         _dialog_proc = None
-    return (out or "").strip() or None
+    if proc.returncode not in (0, None) and sys.platform == "darwin":
+        raise HTTPException(500, "開不了檔案對話框")
+    return (out or "").removesuffix("\n") or None
 
 
 def cancel_dialog() -> bool:
@@ -1118,6 +1179,7 @@ def api_run(body: RunIn) -> dict[str, Any]:
         args = [flag for selected, flag in ((body.futures, "--futures"), (body.intl, "--intl")) if selected]
         # 每次執行先清空檢核單：只留這一次的結果（E1～E3 下次 /api/state 會自然重算回來）。
         SESSION.clear()
+        _PASSED_STEPS.discard(body.kind)
         job = Job(body.kind)
         _job = job
     threading.Thread(target=_run_job, args=(job, module, args), daemon=True).start()
@@ -1288,9 +1350,11 @@ def api_export_log() -> dict[str, Any]:
         out_path.write_text(_redact("\n".join(parts)), encoding="utf-8")
     except OSError as e:
         raise HTTPException(500, f"寫入失敗：{e}") from e
-    if sys.platform == "win32":
-        try:
+    try:
+        if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", str(out_path)])
-        except OSError:
-            pass
+        elif sys.platform == "darwin":
+            subprocess.Popen(["/usr/bin/open", "-R", str(out_path)])
+    except OSError:
+        pass
     return {"ok": True, "path": str(out_path)}

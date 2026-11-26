@@ -11,9 +11,10 @@ Shioaji 1.8.0 的美股複委託可在模擬環境加測委託，在正式環境
 
 ## 打包與宣傳頁
 
-Windows 下載檔由 NSIS 產出。GitHub Pages 從 `main` 的 `docs/` 部署，下載按鈕
-連到最新版的 `shioaji-wizard-setup.exe`。截圖使用隔離設定的實際桌面介面，
-畫面中的 Windows 使用者名稱以「使用者」呈現。
+Windows 下載檔由 NSIS 產出。macOS 分 Apple 晶片與 Intel，兩種磁碟映像由
+`macos-build.yml` 在對應架構建置與驗證。GitHub Pages 從 `main` 的 `docs/`
+部署，依作業系統推薦 GitHub 最新版已上傳的安裝檔。截圖使用隔離設定的實際
+桌面介面，畫面中的 Windows 使用者名稱以「使用者」呈現。
 
 NSIS 依出貨清單解除安裝。啟動器需將執行資料放進安裝目錄的 `data`，並避免 Python
 在程式目錄產生 bytecode，否則從開始選單啟動後，解除安裝會留下快取。發版驗收

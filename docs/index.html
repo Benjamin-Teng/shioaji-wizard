@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Shioaji 開通測試精靈｜永豐 API 模擬與正式驗證</title>
-<meta name="description" content="用四個步驟完成永豐 Shioaji API 的金鑰設定、模擬下單與正式環境驗證，再將設定匯入 Shioaji Pro。支援台股、期貨與美股複委託，提供 Windows 單一安裝檔。">
+<meta name="description" content="用四個步驟完成永豐 Shioaji API 的金鑰設定、模擬下單與正式環境驗證，再將設定匯入 Shioaji Pro。支援台股、期貨與美股複委託。">
 
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="favicon.ico">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="Shioaji 開通測試精靈｜永豐 API 模擬與正式驗證">
-<meta property="og:description" content="金鑰設定、模擬下單、正式環境驗證，再體驗 Shioaji Pro。支援台股、期貨與美股複委託，提供 Windows 單一安裝檔。">
+<meta property="og:description" content="金鑰設定、模擬下單、正式環境驗證，再體驗 Shioaji Pro。支援台股、期貨與美股複委託。">
 <meta property="og:url" content="https://benjamin-teng.github.io/shioaji-wizard/">
 <meta property="og:image" content="https://benjamin-teng.github.io/shioaji-wizard/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -60,6 +60,7 @@
   header .ver{display:inline-block;margin-top:15px;font-family:var(--mono);font-size:.76rem;color:var(--muted);
     border:1px solid var(--border-lit);border-radius:30px;padding:4px 14px;background:rgba(224,170,84,.06)}
   header .ver b{color:var(--accent);font-weight:600}
+  header .ver[hidden]{display:none}
   header p.lead{color:var(--muted);max-width:620px;margin:20px auto 0;font-size:1.06rem}
 
   .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:30px}
@@ -73,6 +74,13 @@
     background:linear-gradient(180deg,rgba(224,170,84,.12),rgba(224,170,84,.05));
     border:1px solid rgba(224,170,84,.42);border-radius:14px;padding:15px 24px;box-shadow:0 6px 22px rgba(224,170,84,.10)}
   .install-hint b{color:var(--accent);font-weight:700}
+  .downloads{max-width:660px;margin:14px auto 0}
+  .downloads summary{width:fit-content;max-width:100%;min-height:44px;margin:auto;
+    padding:9px 12px;color:var(--muted);cursor:pointer}
+  .downloads summary:hover{color:var(--accent)}
+  .download-links{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .download-links .btn{min-height:44px;justify-content:center;padding:8px 14px;font-size:.92rem}
+  .download-links .btn[hidden]{display:none}
 
   .shot{margin:44px auto 0;max-width:1000px;border:1px solid var(--border-lit);border-radius:16px;overflow:hidden;
     box-shadow:0 30px 70px rgba(0,0,0,.55);background:var(--ink)}
@@ -139,13 +147,21 @@
 
 <header>
   <h1>Shioaji 開通測試精靈</h1>
-  <div class="ver">目前版本 <b id="ver">v0.2.0</b> · Windows 10／11（x64）</div>
+  <div class="ver" id="release-version" hidden>目前版本 <b id="ver"></b></div>
   <p class="lead">依序設定金鑰、測試模擬下單、驗證正式帳戶與憑證，再把設定匯入 Shioaji Pro。支援台股，也可加測期貨／選擇權與美股複委託。</p>
   <div class="cta">
-    <a class="btn btn-primary" href="https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest/download/shioaji-wizard-setup.exe">下載 Windows 安裝程式</a>
+    <a class="btn btn-primary" id="primary-download" href="https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest">前往 GitHub 下載</a>
     <a class="btn btn-ghost" href="https://github.com/Benjamin-Teng/shioaji-wizard">GitHub 原始碼</a>
   </div>
-  <p class="install-hint">開啟 <b>shioaji-wizard-setup.exe</b>，安裝完成後從 Windows 開始功能表啟動。免手動解壓、免另裝 Python，也不需要系統管理員權限。</p>
+  <p class="install-hint" id="download-hint" role="status" hidden></p>
+  <details class="downloads" id="other-downloads" hidden>
+    <summary>選擇下載版本</summary>
+    <div class="download-links">
+      <a class="btn btn-ghost" data-download="windows" hidden>Windows 10／11（x64）</a>
+      <a class="btn btn-ghost" data-download="mac-arm" hidden>macOS（Apple 晶片）</a>
+      <a class="btn btn-ghost" data-download="mac-intel" hidden>macOS（Intel）</a>
+    </div>
+  </details>
 </header>
 
 <main class="wrap">
@@ -171,8 +187,8 @@
         <p>可沿用現有 <code>.env</code>，也能自行選擇新建位置。預設優先使用偵測到的 eKey 憑證資料夾，其次是使用者目錄下的 <code>.shioaji-pro</code>。</p>
       </div>
       <div class="card">
-        <h3>單一 Windows 安裝檔</h3>
-        <p>內建 Python 與所需套件，安裝於目前的 Windows 使用者帳號。精靈使用 Microsoft Edge 或 Google Chrome 開啟視窗。</p>
+        <h3>安裝後直接啟動</h3>
+        <p>安裝檔內建 Python 與所需套件。下載區會列出目前可用的 Windows 與 macOS 版本。</p>
       </div>
     </div>
   </section>
@@ -245,7 +261,7 @@
       </details>
       <details>
         <summary>需要先裝 Python 或其他東西嗎？</summary>
-        <div><p>安裝程式已內建 Python 與所需套件。請使用 Windows 10／11（x64）和 Microsoft Edge 或 Google Chrome。</p></div>
+        <div><p>安裝檔已內建 Python 與所需套件。Windows 版支援 Windows 10／11（x64）。下載 macOS 版前，可從 Apple 選單的「關於這台 Mac」查看你的電腦使用 Apple 晶片或 Intel 處理器。</p></div>
       </details>
       <details>
         <summary>資料夾可以放在 OneDrive／Google 雲端硬碟裡嗎？</summary>
@@ -266,7 +282,7 @@
 
   <footer>
     <a href="https://github.com/Benjamin-Teng/shioaji-wizard">GitHub</a> ·
-    <a href="https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest/download/shioaji-wizard-setup.exe">最新版下載</a> ·
+    <a href="https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest">最新版下載</a> ·
     <a href="https://github.com/Benjamin-Teng/shioaji-wizard#readme">說明文件</a> ·
     <a href="https://github.com/Benjamin-Teng/shioaji-wizard/issues">問題回報</a>
     <div class="src">個人開發的開源工具，使用永豐 Shioaji 官方 Python SDK</div>
@@ -274,20 +290,95 @@
 
 </main>
 <script>
-/* 網頁只有在確認 Release 含相同檔名的安裝程式時，才更新靜態版本。 */
 (function () {
-  var el = document.getElementById('ver');
-  if (!el) return;
+  const artifacts = {
+    windows: { file: 'shioaji-wizard-setup.exe', label: '下載 Windows 安裝程式' },
+    'mac-arm': { file: 'shioaji-wizard-macos-arm64.dmg', label: '下載 macOS 版（Apple 晶片）' },
+    'mac-intel': { file: 'shioaji-wizard-macos-x64.dmg', label: '下載 macOS 版（Intel）' },
+  };
+  const releaseRoot = 'https://github.com/Benjamin-Teng/shioaji-wizard/releases/';
+  const primary = document.getElementById('primary-download');
+  const hint = document.getElementById('download-hint');
+  const options = document.getElementById('other-downloads');
+  const summary = options.querySelector('summary');
+  const uaData = navigator.userAgentData;
+
+  function detectPlatform() {
+    const ua = navigator.userAgent || '';
+    const platform = (uaData?.platform || navigator.platform || '').toLowerCase();
+    // iPadOS 的桌面模式也會自稱 Mac，以觸控點數排除。
+    if (uaData?.mobile || /Android|iPhone|iPad|iPod/i.test(ua)
+        || (platform.startsWith('mac') && navigator.maxTouchPoints > 1)) return '';
+    if (platform.startsWith('win') || (!platform && /Windows NT/i.test(ua))) return 'windows';
+    if (platform.startsWith('mac') || (!platform && /Macintosh/i.test(ua))) return 'macos';
+    return '';
+  }
+
+  function showHint(text) {
+    hint.textContent = text;
+    hint.hidden = false;
+  }
+
+  async function macArchitecture() {
+    if (!uaData?.getHighEntropyValues) return '';
+    try {
+      const { architecture, bitness } = await uaData.getHighEntropyValues(['architecture', 'bitness']);
+      if (architecture === 'arm' && bitness === '64') return 'mac-arm';
+      if (architecture === 'x86' && bitness === '64') return 'mac-intel';
+    } catch (_) { /* Safari 與隱私設定可能無法辨識晶片。 */ }
+    return '';
+  }
+
+  function recommend(id, urls) {
+    primary.href = urls[id];
+    primary.textContent = artifacts[id].label;
+  }
+
+  const os = detectPlatform();
   fetch('https://api.github.com/repos/Benjamin-Teng/shioaji-wizard/releases/latest', {
     headers: { Accept: 'application/vnd.github+json' }
   })
-    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-    .then(function (d) {
-      if (d && d.tag_name && Array.isArray(d.assets) && d.assets.some(function (asset) {
-        return asset.name === 'shioaji-wizard-setup.exe';
-      })) el.textContent = d.tag_name;
+    .then(response => response.ok ? response.json() : null)
+    .then(async release => {
+      if (!Array.isArray(release?.assets) || typeof release.tag_name !== 'string' || !release.tag_name) return;
+      const uploaded = new Set(release.assets.filter(asset => asset.state === 'uploaded').map(asset => asset.name));
+      const urls = {};
+      for (const [id, artifact] of Object.entries(artifacts)) {
+        if (!uploaded.has(artifact.file)) continue;
+        // 使用確認存在的標籤與檔名，避免部署順序或第三方 URL 造成錯誤下載。
+        const url = releaseRoot + 'download/' + encodeURIComponent(release.tag_name) + '/' + artifact.file;
+        const link = options.querySelector('[data-download="' + id + '"]');
+        urls[id] = link.href = url;
+        link.hidden = false;
+      }
+      if (!Object.keys(urls).length) return;
+      document.getElementById('ver').textContent = release.tag_name;
+      document.getElementById('release-version').hidden = false;
+      options.hidden = false;
+      if (os === 'windows' && urls.windows) {
+        recommend('windows', urls);
+        showHint('開啟安裝程式，完成後從 Windows 開始功能表啟動。');
+        return;
+      }
+      if (os === 'macos' && (urls['mac-arm'] || urls['mac-intel'])) {
+        showHint('開啟磁碟映像檔，將 Shioaji 測試精靈拖到「應用程式」。');
+        primary.href = '#other-downloads';
+        primary.textContent = '選擇 macOS 下載版本';
+        primary.addEventListener('click', event => {
+          if (primary.getAttribute('href') !== '#other-downloads') return;
+          event.preventDefault();
+          options.open = true;
+          summary.focus();
+        });
+        const arch = await macArchitecture();
+        if (arch && urls[arch]) recommend(arch, urls);
+        else options.open = true;
+        return;
+      }
+      if (os === 'macos') showHint('這個版本目前提供 Windows 安裝檔。');
+      options.open = true;
     })
-    .catch(function () { /* 沿用靜態版本值 */ });
+    .catch(() => { /* GitHub 頁面仍可直接提供版本與檔案。 */ });
 })();
 </script>
 </body>

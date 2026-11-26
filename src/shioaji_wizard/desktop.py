@@ -32,7 +32,7 @@ _DEFAULT_IDLE_TIMEOUT = 90.0
 _WATCHDOG_INTERVAL = 5.0
 """watchdog 檢查週期（秒）；遠小於 idle_timeout，關窗後最遲約一個週期內收攤。"""
 
-_WINDOW_SIZE = (1040, 820)
+_WINDOW_SIZE = (1240, 900)
 """殼視窗預設大小（本專案不做視窗大小持久化，恆用此值）。"""
 
 
@@ -277,7 +277,7 @@ def serve(
 
                     def _brand() -> None:
                         try:
-                            ok = shell.brand_window(window_pid, timeout=20.0)
+                            ok = shell.brand_window(window_pid, timeout=20.0, maximize=True)
                         except Exception:  # noqa: BLE001 - 純外觀，不擋伺服器
                             ok = False
                         print(
