@@ -9,6 +9,7 @@ import os
 import platform
 import plistlib
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -128,7 +129,6 @@ def verify_app(app: Path, version: str, temp: Path) -> None:
         subprocess.Popen(
             [
                 str(installed / "Contents/MacOS" / APP_EXECUTABLE),
-                "--no-shell",
                 "--port",
                 str(port),
                 "--root",
@@ -154,12 +154,19 @@ def verify_app(app: Path, version: str, temp: Path) -> None:
                 except (OSError, urllib.error.URLError):
                     time.sleep(0.2)
                     continue
-                if state["platform"] == "darwin" and state["version"] == version and "設定金鑰" in page:
+                browser_args = run("/bin/ps", "-ax", "-o", "command=", cwd=data)
+                if (
+                    state["platform"] == "darwin"
+                    and state["version"] == version
+                    and "設定金鑰" in page
+                    and f"--app=http://127.0.0.1:{port}/" in browser_args
+                ):
+                    verify_picker(python, data, env)
                     print(
-                        f"macOS verify PASS：{platform.machine()}、DMG、Launcher、首頁／狀態、Shioaji {sdk}"
+                        f"macOS verify PASS：{platform.machine()}、DMG、桌面視窗啟動、原生選檔、Shioaji {sdk}"
                     )
                     return
-                break
+                time.sleep(0.2)
             raise RuntimeError(
                 "內嵌 App 啟動驗證失敗：\n" + log.read_text(encoding="utf-8", errors="replace")
             )
@@ -170,6 +177,34 @@ def verify_app(app: Path, version: str, temp: Path) -> None:
                     proc.wait(timeout=5)
                 if proc.poll() is None:
                     proc.kill()
+
+
+def verify_picker(python: Path, data: Path, env: dict[str, str]) -> None:
+    """實際進入原生選檔對話框。CI 結束對話框的行程，避免等候人工選檔。"""
+    command = [
+        str(python),
+        "-c",
+        "from pathlib import Path; from shioaji_wizard.server import _show_native_picker; "
+        "_show_native_picker(Path.cwd(), 'settings')",
+    ]
+    with subprocess.Popen(
+        command, env=env, cwd=data, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    ) as picker:
+        try:
+            _, stderr = picker.communicate(timeout=4)
+        except subprocess.TimeoutExpired:
+            # JXA 的 runModal 阻塞表示已進入對話框；一併收掉 Python 和 osascript。
+            stop_group = os.killpg  # ty: ignore[unresolved-attribute] — 僅在 Darwin 驗收。
+            with contextlib.suppress(ProcessLookupError):
+                stop_group(picker.pid, signal.SIGTERM)
+            try:
+                picker.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(ProcessLookupError):
+                    stop_group(picker.pid, signal.SIGKILL)  # ty: ignore[unresolved-attribute]
+                picker.communicate()
+        else:
+            raise RuntimeError(f"macOS 選檔未停留在選擇視窗：{stderr.decode(errors='replace')}")
 
 
 def build(dist: Path, *, verify: bool) -> Path:

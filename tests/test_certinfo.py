@@ -133,7 +133,9 @@ def test_expired_certificate_is_still_readable_and_classified_as_fail(tmp_path: 
     info = certinfo.read_pfx_info(pfx, "correct-pw-1234")
 
     assert info.not_after < datetime.now(UTC)
-    status, reason, _warning = test_ca.classify_ca_expirations([info.not_after], datetime.now(info.not_after.tzinfo))
+    status, reason, _warning = test_ca.classify_ca_expirations(
+        [info.not_after], datetime.now(info.not_after.tzinfo)
+    )
     assert status == "FAIL"
     assert "過期" in reason
 

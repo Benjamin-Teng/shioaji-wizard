@@ -280,6 +280,9 @@ def resolve_window(
     認列前於 handle 開啟後**複查指紋**（消除快照→OpenProcess 間的 PID 重用
     窗口）。``timeout`` 秒內無法認列（或末階 fallback 無 profile、``abort``
     成立）→ 回 None，``desktop`` 退回心跳閒置逾時機制。"""
+    if sys.platform == "darwin":
+        # macOS 的瀏覽器行程不走 Windows CIM／handle，直接由頁面心跳判斷。
+        return None
     if result.mode != "app" or result.profile_dir is None or result.browser is None:
         return None
     launcher = result.process

@@ -40,10 +40,10 @@ from shioaji_wizard.sjenv import (
     FAIL,
     OPTIONAL_KEYS,
     PASS,
-    SKIP,
     REQUIRED_KEYS,
     ROOT,
     RUNTIME,
+    SKIP,
     atomic_write_text,
     ensure_env_keys,
     ensure_runtime_dir,
@@ -71,7 +71,10 @@ install_guards(app)  # Host／Origin 防線在 app 建構時就掛上，任何�
 # ---------------------------------------------------------------- 狀態
 SESSION: dict[str, dict[str, str]] = {}  # name -> {name,status,reason}
 _PASSED_STEPS: set[str] = set()  # 同一帳號本次開啟中已通過的測試步驟
-_REQUIRED_CHECKS = {"a": {"A1", "A3"}, "b": {"B1", "B5", "B6"}}
+_ELECTIVE_CHECKS = {
+    "a": {"--futures": {"A4", "A5"}, "--intl": {"A6", "A7"}},
+    "b": {"--futures": {"B3"}, "--intl": {"B7"}},
+}
 _lock = threading.Lock()
 _last_heartbeat = time.monotonic()
 
@@ -716,10 +719,16 @@ def _run_job(job: Job, module: str, args: list[str]) -> None:
                 _STALE_FIELDS.difference_update(_COVERS.get(job.kind, set()))
             job.rc = rc if not timeout_reason else (rc or 124)
             if job.rc == 0:
-                passed = {item["name"][:2] for item in job.report if item["status"] == PASS}
-                if _REQUIRED_CHECKS[job.kind] <= passed and all(
-                    item["status"] in {PASS, SKIP} for item in job.report
-                ):
+                expected = {code for code in ORDER if code.startswith(job.kind.upper())}
+                skipped = {
+                    code
+                    for flag, codes in _ELECTIVE_CHECKS[job.kind].items()
+                    if flag not in args
+                    for code in codes
+                }
+                observed = {item["name"][:2]: item["status"] for item in job.report}
+                checks = {code: SKIP if code in skipped else PASS for code in expected}
+                if len(job.report) == len(checks) and observed == checks:
                     _PASSED_STEPS.add(job.kind)
 
 
@@ -1009,6 +1018,7 @@ function run(argv) {
   picker.canChooseDirectories = kind === 'directory';
   picker.canChooseFiles = kind !== 'directory';
   picker.showsHiddenFiles = kind === 'settings';
+  // JXA 透過讀取屬性呼叫無參數的 Objective-C 方法。
   return picker.runModal === $.NSModalResponseOK ? ObjC.unwrap(picker.URL.path) : '';
 }
 """

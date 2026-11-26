@@ -721,16 +721,24 @@ def test_passed_steps_survive_other_tests_and_are_invalidated_by_settings(
         "/api/env",
         json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_passwd": "fake", "ca_path": str(pfx)},
     )
-    for module, checks in (("fixture_a", ("A1", "A3")), ("fixture_b", ("B1", "B5", "B6"))):
+    for module, checks in (
+        ("fixture_a", ("PASS", "PASS", "PASS", "SKIP", "SKIP", "SKIP", "SKIP")),
+        ("fixture_b", ("PASS", "PASS", "SKIP", "PASS", "PASS", "PASS", "SKIP")),
+    ):
         (tmp_path / f"{module}.py").write_text(
             "from shioaji_wizard.sjenv import Report\n"
             "report = Report()\n"
-            f"for code in {checks!r}:\n    report.add(code + ' fixture', 'PASS')\n",
+            "import sys\n"
+            f"for i, status in enumerate({checks!r}, 1):\n"
+            f"    report.add('{module[-1].upper()}' + str(i) + ' fixture', status)\n"
+            "if '--intl' in sys.argv:\n    report.add('A7 duplicate', 'PASS')\n",
             encoding="utf-8",
         )
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     run_job = server._run_job
-    monkeypatch.setattr(server, "_run_job", lambda job, module, args: run_job(job, f"fixture_{job.kind}", []))
+    monkeypatch.setattr(
+        server, "_run_job", lambda job, module, args: run_job(job, f"fixture_{job.kind}", args)
+    )
 
     for kind, expected in (("a", ["a"]), ("b", ["a", "b"])):
         assert client.post("/api/run", json={"kind": kind}).status_code == 200
@@ -742,6 +750,12 @@ def test_passed_steps_survive_other_tests_and_are_invalidated_by_settings(
     assert client.post("/api/env", json={"ca_passwd": "changed"}).status_code == 200
     assert client.get("/api/state").json()["passed_steps"] == ["a"]
     assert client.post("/api/env", json={"api_key": "x" * 44, "unlock_keys": True}).status_code == 200
+    assert client.get("/api/state").json()["passed_steps"] == []
+    assert client.post("/api/run", json={"kind": "a", "futures": True}).status_code == 200
+    _wait_job_done(server)
+    assert client.get("/api/state").json()["passed_steps"] == []
+    assert client.post("/api/run", json={"kind": "a", "intl": True}).status_code == 200
+    _wait_job_done(server)
     assert client.get("/api/state").json()["passed_steps"] == []
 
 

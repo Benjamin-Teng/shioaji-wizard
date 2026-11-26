@@ -137,7 +137,11 @@ def classify_ca_expirations(expirations: list[datetime], now: datetime) -> tuple
         return FAIL, f"憑證已於 {tw_date(earliest)} 過期，請到 API 管理頁重新下載", ""
     if left < 30:
         when = "剩不到 1 天" if left == 0 else f"{left} 天後"
-        return PASS, f"憑證 {when}（{tw_date(earliest)}）到期，建議儘早到 API 管理頁重新下載", "certificate_expiring"
+        return (
+            PASS,
+            f"憑證 {when}（{tw_date(earliest)}）到期，建議儘早到 API 管理頁重新下載",
+            "certificate_expiring",
+        )
     return PASS, f"到期日 {tw_date(earliest)}（剩 {left} 天）", ""
 
 

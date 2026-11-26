@@ -220,7 +220,9 @@ def test_ca_expiry_date_is_shown_in_taiwan_time_not_utc():
 
     assert test_ca.tw_date(utc_expiry) == "2028-08-22"
     assert test_ca.tw_date(datetime(2028, 8, 22, 7, 0)) == "2028-08-22"  # naive：原樣
-    _status, reason, _warning = test_ca.classify_ca_expirations([utc_expiry], datetime(2028, 8, 22, 0, tzinfo=UTC))
+    _status, reason, _warning = test_ca.classify_ca_expirations(
+        [utc_expiry], datetime(2028, 8, 22, 0, tzinfo=UTC)
+    )
     assert "2028-08-22" in reason and "過期" in reason
 
 
