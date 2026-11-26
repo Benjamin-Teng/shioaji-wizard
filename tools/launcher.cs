@@ -35,9 +35,14 @@ static class Launcher
             {
                 return; // 啟動中再次雙擊：忽略（防重複開兩份 app）
             }
-            string root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+            string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
+            // NSIS 的程式目錄帶版本，執行資料固定留在同層 data。
+            // 舊 portable 使用者仍可從原資料夾啟動並沿用既有設定。
+            string root = File.Exists(Path.Combine(appDir, ".shioaji-wizard-installed"))
+                ? Path.Combine(Directory.GetParent(appDir).FullName, "data")
+                : appDir;
 
-            RehideTopLevel(root, "wizard.exe");
+            RehideTopLevel(appDir, "wizard.exe");
 
             string runtimeDir = Path.Combine(root, ".runtime");
             try { Directory.CreateDirectory(runtimeDir); } catch (Exception) { }
@@ -48,11 +53,13 @@ static class Launcher
 
             var psi = new ProcessStartInfo
             {
-                FileName = Path.Combine(root, "python", "pythonw.exe"),
+                FileName = Path.Combine(appDir, "python", "pythonw.exe"),
                 Arguments = "-m shioaji_wizard --root \"" + root + "\"",
                 WorkingDirectory = root,
                 UseShellExecute = false,
             };
+            // 安裝目錄只放出貨清單內的檔案，讓解除安裝可安全逐項清除。
+            psi.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"] = "1";
             Process proc = Process.Start(psi);
 
             RunSplash(ready, status, proc);

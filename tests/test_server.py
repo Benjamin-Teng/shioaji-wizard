@@ -122,6 +122,82 @@ def test_state_without_env(client):
     assert all(i["status"] == "FAIL" for i in d["summary"])
 
 
+def test_explicit_env_selection_keeps_source_bytes_and_resolves_relative_ca(
+    client, env_mods, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, server = env_mods
+    external = tmp_path / "外部設定"
+    external.mkdir()
+    env_file = external / ".env"
+    content = f"SJ_API_KEY={FAKE_KEY}\nSJ_SEC_KEY={FAKE_SEC}\nSJ_CA_PATH=CA.pfx\n".encode()
+    env_file.write_bytes(content)
+    (external / "CA.pfx").touch()
+    monkeypatch.setattr(server, "_pick_setup_path", lambda mode, start: env_file)
+
+    response = client.post("/api/setup-source", json={"mode": "existing"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["env_path"] == str(env_file)
+    state = client.get("/api/state").json()
+    assert state["env"]["pfx_resolved"] == str(external / "CA.pfx")
+    assert env_file.read_bytes() == content
+    assert FAKE_KEY not in response.text
+
+    _, restarted = _reload_modules(monkeypatch, tmp_path)
+    assert restarted.env_path() == env_file
+
+
+def test_explicit_new_env_stays_selected_when_changing_certificate(
+    client, env_mods, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, server = env_mods
+    external = tmp_path / "custom"
+    external.mkdir()
+    monkeypatch.setattr(server, "_pick_setup_path", lambda mode, start: external)
+
+    response = client.post("/api/setup-source", json={"mode": "custom"})
+    assert response.status_code == 200, response.text
+    assert not (external / ".env").exists()
+    save = client.post("/api/env", json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC})
+    assert save.status_code == 200, save.text
+    certificate = tmp_path / "other.pfx"
+    certificate.touch()
+    save = client.post("/api/env", json={"ca_path": str(certificate)})
+    assert save.status_code == 200, save.text
+    assert client.get("/api/state").json()["env"]["pfx_resolved"] == str(certificate)
+    assert (external / ".env").exists()
+    assert not (tmp_path / ".env").exists()
+
+
+def test_cancelled_explicit_env_choice_does_not_change_profile(client, env_mods, monkeypatch):
+    _, server = env_mods
+    original = server.env_path()
+    monkeypatch.setattr(server, "_pick_setup_path", lambda mode, start: None)
+    response = client.post("/api/setup-source", json={"mode": "existing"})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"ok": True, "cancelled": True}
+    assert server.env_path() == original
+
+
+def test_setup_default_path_prefers_ekey_and_uses_home_otherwise(
+    client, env_mods, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, server = env_mods
+    home = tmp_path / "home"
+    monkeypatch.setattr(server, "_setup_home", lambda: home)
+    state = client.get("/api/state").json()
+    assert state["setup_default_kind"] == "home"
+    assert state["setup_default_path"] == str(home / ".shioaji-pro" / ".env")
+
+    cert = tmp_path / "ekey" / "S" / "Test.pfx"
+    cert.parent.mkdir(parents=True)
+    cert.touch()
+    monkeypatch.setattr(server, "find_eleader_pfx", lambda: [str(cert)])
+    state = client.get("/api/state").json()
+    assert state["setup_default_kind"] == "ekey"
+    assert state["setup_default_path"] == str(cert.parent / ".env")
+
+
 def test_post_env_creates_file_and_masks(client, tmp_path: Path):
     r = client.post(
         "/api/env", json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_passwd": "", "ca_path": ""}
@@ -619,6 +695,33 @@ def test_api_run_clears_session_immediately(env_mods, client, monkeypatch: pytes
     names = [i["name"] for i in client.get("/api/state").json()["summary"]]
     assert "B1 正式環境登入" not in names
     assert any(n.startswith("E1") for n in names)  # E1～E3 由 inspect_env() 當場重算，會自然回來
+
+
+@pytest.mark.parametrize(("kind", "worker"), [("a", "test_sim_order"), ("b", "test_ca")])
+def test_api_run_passes_intl_option_to_selected_worker(env_mods, client, monkeypatch, tmp_path, kind, worker):
+    from threading import Event
+
+    _, server = env_mods
+    pfx = tmp_path / "Sinopac.pfx"
+    pfx.write_bytes(b"pfx")
+    client.post(
+        "/api/env",
+        json={"api_key": FAKE_KEY, "sec_key": FAKE_SEC, "ca_path": str(pfx), "ca_passwd": "pw"},
+    )
+    called = Event()
+    launches = []
+
+    def fake_run_job(job, module, args):
+        launches.append((module, args))
+        job.rc = 0
+        called.set()
+
+    monkeypatch.setattr(server, "_run_job", fake_run_job)
+    response = client.post("/api/run", json={"kind": kind, "futures": True, "intl": True})
+
+    assert response.status_code == 200
+    assert called.wait(2)
+    assert launches == [(f"shioaji_wizard.{worker}", ["--futures", "--intl"])]
 
 
 def test_run_clears_previous_session_and_lock_reflects_latest_login(

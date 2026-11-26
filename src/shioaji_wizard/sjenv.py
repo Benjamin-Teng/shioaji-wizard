@@ -5,9 +5,8 @@
 多帳號：.env 實際落在「目前 profile 目錄」（PROFILE_DIR），預設就是 ROOT（單一
 帳號／舊行為）；server.py 支援切換到 eLeader 憑證資料夾（``C:\\ekey\\551\\<身分證
 字號>\\S``）時，會把 SJ_PROFILE_DIR 設給跑 test_ca／test_sim_order 的子行程，
-這兩支腳本因此不用改，直接沿用 ENV_PATH。ROOT／RUNTIME／DEFAULT_PFX／
-``pfx_path()`` 的相對路徑基準一律維持綁 app ROOT，不隨 profile 走
-（``.runtime`` 絕不可能建到 ekey 資料夾裡）。
+這兩支腳本因此不用改，直接沿用 ENV_PATH。顯式選擇的設定檔可由 SJ_CA_DEFAULT
+另行指定預設憑證及相對路徑的基準；內部 ``.runtime`` 始終留在 app ROOT。
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ ROOT = Path(os.environ.get("SJ_ENV_DIR") or Path.cwd()).resolve()
 # 伺服器行程本身的「目前 profile」是可變狀態，由 server.py 自行維護，不讀這個常數。
 PROFILE_DIR = Path(os.environ.get("SJ_PROFILE_DIR") or ROOT).resolve()
 ENV_PATH = PROFILE_DIR / ".env"
-DEFAULT_PFX = ROOT / "Sinopac.pfx"
+DEFAULT_PFX = Path(os.environ["SJ_CA_DEFAULT"]) if os.environ.get("SJ_CA_DEFAULT") else ROOT / "Sinopac.pfx"
 # 內部檔案（app.log、shioaji.log、.app-ready、.app-status）全放這個隱藏子資料夾，
 # 使用者看到的根層只有 wizard.exe／.env／Sinopac.pfx／匯出的 .log。
 RUNTIME = ROOT / ".runtime"
@@ -59,8 +58,8 @@ def hide_path(path: Path) -> None:
 REQUIRED_KEYS = ("SJ_API_KEY", "SJ_SEC_KEY")
 OPTIONAL_KEYS = ("SJ_CA_PASSWD", "SJ_CA_PATH")
 
-PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
-_MARK = {PASS: "✓ 通過", FAIL: "✗ 未通過", SKIP: "－ 未測"}
+PASS, FAIL, SKIP, UNKNOWN = "PASS", "FAIL", "SKIP", "UNKNOWN"
+_MARK = {PASS: "✓ 通過", FAIL: "✗ 未通過", SKIP: "－ 未測", UNKNOWN: "？待確認"}
 
 
 # ---------------------------------------------------------------- .env
@@ -115,13 +114,13 @@ def load_env() -> dict[str, str]:
     return values
 
 
-def pfx_path(env: dict[str, str]) -> Path:
-    """SJ_CA_PATH 有設就尊重（相對路徑以根目錄為基準）；沒設才用同資料夾的 Sinopac.pfx。"""
+def pfx_path(env: dict[str, str], *, default: Path = DEFAULT_PFX) -> Path:
+    """SJ_CA_PATH 為相對路徑時，以預設憑證所在資料夾為基準。"""
     p = env.get("SJ_CA_PATH")
     if not p:
-        return DEFAULT_PFX
+        return default
     path = Path(p).expanduser()
-    return path if path.is_absolute() else (ROOT / path)
+    return path if path.is_absolute() else (default.parent / path)
 
 
 def ensure_env_keys(path: Path, defaults: dict[str, str]) -> list[str]:
@@ -142,7 +141,7 @@ def ensure_env_keys(path: Path, defaults: dict[str, str]) -> list[str]:
 
 # ---------------------------------------------------------------- 測試結果
 class Report:
-    """收集個別測試的 通過／未通過／未測 與原因；可印總覽，也可寫 JSON 給精靈彙整。
+    """收集個別測試的結果與原因；可印總覽，也可寫 JSON 給精靈彙整。
 
     環境變數 SJ_REPORT_FILE 有設時，每次 add 都會把整份結果重寫到該檔（JSON），
     精靈（wizard.py）用它把 A／B 兩支腳本的結果合併成一張總表。
@@ -172,11 +171,11 @@ class Report:
 
     @property
     def all_passed(self) -> bool:
-        return all(i["status"] != FAIL for i in self.items)
+        return all(i["status"] in (PASS, SKIP) for i in self.items)
 
 
 def print_summary(items: list[dict[str, str]], title: str = "測試結果總覽") -> None:
-    """列出每一項測試：通過／未通過／未測，未通過的把原因寫清楚。
+    """逐項列出測試結果及需要使用者處理的原因。
     版面：═══ 框線；每列「結果 ＋ 項目」，原因另起一行固定縮排——不靠欄寬對齊，
     窄視窗（GUI 的輸出區）折行也不會跑版。SJ_NO_TEXT_SUMMARY=1 可關掉。"""
     if os.environ.get("SJ_NO_TEXT_SUMMARY"):
@@ -197,6 +196,7 @@ def print_summary(items: list[dict[str, str]], title: str = "測試結果總覽"
     n_fail = sum(1 for i in items if i["status"] == FAIL)
     n_pass = sum(1 for i in items if i["status"] == PASS)
     n_skip = sum(1 for i in items if i["status"] == SKIP)
+    n_unknown = sum(1 for i in items if i["status"] == UNKNOWN)
     print(thin)
-    print(f" 通過 {n_pass}　未通過 {n_fail}　未測 {n_skip}")
+    print(f" 通過 {n_pass}　未通過 {n_fail}　未測 {n_skip}" + (f"　待確認 {n_unknown}" if n_unknown else ""))
     print(line)

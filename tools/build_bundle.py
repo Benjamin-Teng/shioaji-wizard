@@ -1,27 +1,11 @@
-"""portable bundle 打包腳本（開發機工具）。
+"""Windows NSIS 安裝程式與 portable bundle 打包（開發機工具）。
 
-用法：``uv run python tools/build_bundle.py [--zip] [--verify] [--allow-oversize]``。
+用法：``uv run python tools/build_bundle.py [--verify] [--makensis <路徑>]``。
+``--portable-only`` 只產出開發用資料夾，``--zip`` 可另產 zip。
 
-移植自 fcn-pricing 的 ``tools/build_bundle.py``（設計文件見該專案
-``docs/superpowers/specs/2026-07-19-build-bundle-design.md``）：路線＝
-「本機為源＋uv 供應」——runtime 複製 uv 管理的 3.12.13 standalone、套件由
-uv.lock 同版 vendored、launcher 以 Windows 內建 csc.exe 現編。全程建在
-dist/.tmp 下，最後一步才 os.replace 成正式名（交易式，失敗不污染前次成功
-bundle）。
-
-與 fcn 版的差異（2026-08-22 本專案拍板）：
-- 本專案沒有 golden oracle／可離線生成的「示範票券」，故沒有
-  preload／golden_check 這兩步——不對永豐下任何連線，``verify_bundle``
-  只打 ``/`` 與 ``/api/state``。
-- 尚無 release tag 慣例，``preflight`` 略去 fcn 版的版本↔GitHub tag 同步
-  守衛（僅留 uv／git／csc 三個工具存在性檢查）。
-- 使用者看到的資料夾刻意「隱藏到只剩必要幾項」：bundle 目錄名固定為
-  ``shioaji_wizard``（不帶版本——每次都內容覆蓋式更新，版本號只留在 zip
-  檔名＋launcher 版本資源）；頂層除 ``wizard.exe``／``.env``／``*.pfx``／
-  ``*.log`` 外全設 Windows hidden 屬性（``python/``、啟動（除錯）.bat、
-  README.txt、執行期才出現的 ``.runtime/``）。zip 條目也把 hidden 寫進
-  ``external_attr``（Explorer／7-Zip 解壓會還原；``Expand-Archive``／``tar``
-  不會），故 launcher.cs 啟動時也會 best-effort 重設一次。
+以 uv 管理的 Windows runtime、鎖定相依套件與 WinForms launcher 組成乾淨
+payload，從暫存來源編譯單一 NSIS 安裝檔。不將 .env、憑證或執行紀錄
+帶進安裝程式。已存在的 portable bundle 設定仍保留在自己的資料夾。
 """
 
 from __future__ import annotations
@@ -57,6 +41,10 @@ RELEASE_SLUG = "shioaji-wizard"
 """發布 zip 的 ASCII 檔名前綴（bundle 目錄名已是 ASCII，這裡只是保留與
 fcn-pricing 一致的『zip 另有專屬命名』慣例，供之後若改回中文顯示名時不必
 再補一次這道 guard）。"""
+
+INSTALLER_EXE_NAME = "shioaji-wizard-setup.exe"
+INSTALLER_MARKER = ".shioaji-wizard-installed"
+UNINSTALLER_EXE_NAME = "uninstall-shioaji-wizard.exe"
 
 CSC_PATH = Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe")
 """Windows 內建 .NET Framework C# 編譯器（每台 Win10/11 皆有）。"""
@@ -266,7 +254,11 @@ def render_debug_bat() -> str:
     return (
         "@echo off\r\n"
         'cd /d "%~dp0"\r\n'
-        '"%~dp0python\\python.exe" -m shioaji_wizard --root "%~dp0."\r\n'
+        'set "DATA_ROOT=%CD%"\r\n'
+        f'if exist "{INSTALLER_MARKER}" for %%I in ("%CD%\\..\\data") do set "DATA_ROOT=%%~fI"\r\n'
+        'if not exist "%DATA_ROOT%" mkdir "%DATA_ROOT%"\r\n'
+        'set "PYTHONDONTWRITEBYTECODE=1"\r\n'
+        '"%~dp0python\\python.exe" -m shioaji_wizard --root "%DATA_ROOT%"\r\n'
         "pause\r\n"
     )
 
@@ -280,23 +272,17 @@ def render_readme(version: str) -> str:
 
 使用方式
 --------
-1. 雙擊「wizard.exe」即開啟應用視窗。
-2. 第一次使用：把永豐提供的憑證檔複製到本資料夾，改名為
-   「Sinopac.pfx」；並在畫面上填入 API 金鑰／憑證密碼。若你是用永豐
-   eLeader 申請的憑證，畫面會自動列出偵測到的帳號（身分證字號已打碼），
-   點選即可切換，設定會存在該憑證所在的資料夾。
-3. 關閉視窗即自動結束背景服務，無需其他操作。
+1. 安裝版從「開始」選單開啟「Shioaji 測試精靈」；可攜版雙擊「wizard.exe」。
+2. 選擇或建立 .env，依畫面完成模擬下單驗證。正式環境驗證時再選擇
+   永豐提供的 Sinopac.pfx，並填入憑證密碼。
+3. 關閉視窗後會自動結束背景服務。
 
-SmartScreen 一直跳「已保護您的電腦」？
-------------------------------------
-成因：從網路下載的檔案帶有「來源標記(Mark of the Web)」，部分解壓縮
-軟體（WinRAR／7-Zip 等）會把它一併套到解出來的 .exe，導致每次啟動都被
-攔。點「其他資訊」→「仍要執行」只對當次有效，故會反覆跳出。擇一根治：
-
-- 立即解除（對現在這一份）：在「wizard.exe」上右鍵 → 內容 →
-  勾「解除封鎖(Unblock)」→ 確定，之後啟動就不再跳。
-- 下次下載新版時：先在下載的壓縮檔（.zip）上右鍵 → 內容 →
-  勾「解除封鎖」→ 確定，再解壓縮，解出來的檔案就是乾淨的。
+下載與 SmartScreen
+------------------
+新版從 GitHub Release 下載：
+https://github.com/Benjamin-Teng/shioaji-wizard/releases/latest
+如果 Windows 顯示 SmartScreen 提示，請先核對下載來源及 Release 提供的
+SHA-256 檔案雜湊值。
 
 系統需求
 --------
@@ -309,9 +295,8 @@ SmartScreen 一直跳「已保護您的電腦」？
 - 本軟體為個人開發的開源工具，非永豐金證券官方軟體，與永豐金證券無任何
   隸屬或合作關係。
 - 金鑰只在你的電腦與永豐官方 API 之間傳輸：API Key／Secret Key／憑證密碼
-  由你輸入後存在「.env」（一般在本資料夾；若你切換到 eLeader 憑證帳號，
-  「.env」會改存在該憑證所在的資料夾，畫面上會顯示目前這份的完整位置），
-  測試時由本機子行程讀取、交給永豐官方 shioaji SDK 以加密連線（HTTPS）連
+  由你輸入後存在選用的 .env；測試時由本機子行程讀取，再交給永豐
+  官方 shioaji SDK 以加密連線（HTTPS）連到
   永豐伺服器。本軟體不會把金鑰、憑證或帳號資料送到永豐以外的伺服器，
   開發者也無從取得。唯一的第三方連線：
   週一～五 18:00–20:00（永豐限台灣 IP 的時段）開啟程式或執行 A 時，會向
@@ -330,14 +315,10 @@ SmartScreen 一直跳「已保護您的電腦」？
 
 資料與疑難排解
 --------------
-- 「Sinopac.pfx」（憑證檔）若沒有切換到 eLeader 帳號，務必放在本資料夾
-  根層；「.env」（API 金鑰等設定）由程式自動產生，一般也在本資料夾根層，
-  但切換到 eLeader 憑證帳號時會改存在該憑證所在的資料夾（畫面上會顯示
-  目前這份的完整位置）。不論哪個位置，都**勿放進 OneDrive／Google 雲端
-  硬碟等雲端同步資料夾**——同步軟體可能鎖檔或延遲寫入，造成憑證讀取失敗。
-- 本資料夾內的「python」「.runtime」等其他項目是程式內部檔案，已設為
-  隱藏，不需理會（若因解壓縮工具沒保留隱藏屬性而看得到，也不影響運作）。
-- 遇到問題：先在畫面上按「匯出除錯紀錄」，會在本資料夾產生一個
+- 從畫面上的路徑按鈕查找目前使用的 .env；憑證可和 .env 分開存放。
+  程式更新和解除安裝會保留使用者設定。請勿將金鑰或憑證放進雲端
+  同步資料夾。
+- 遇到問題時按「匯出除錯紀錄」，會在應用資料目錄產生一個
   「shioaji_wizard-debug-*.log」檔案，回報問題時請附上（金鑰等機密資訊
   已遮罩）。
 - 若視窗根本開不起來，雙擊「啟動（除錯）.bat」可看到即時錯誤訊息。
@@ -391,14 +372,14 @@ def isolated_env(bundle: Path) -> dict[str, str]:
 
 
 def run_step(
-    cmd: list[str],
+    cmd: list[str] | str,
     *,
     timeout: float,
     what: str,
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> str:
-    """跑一步外部指令（list-argv、無 shell、utf-8、顯式 timeout）；失敗
+    """跑一步外部指令（無 shell、UTF-8、顯式 timeout）；失敗
     即 BuildError（帶該步 stderr，供直接定位）。回傳 stdout。"""
     try:
         result = subprocess.run(
@@ -412,11 +393,11 @@ def run_step(
             timeout=timeout,
         )
     except FileNotFoundError as e:
-        raise BuildError(f"{what}：找不到執行檔 {cmd[0]}（{e}）") from e
+        raise BuildError(f"{what}：找不到執行檔（{e}）") from e
     except subprocess.TimeoutExpired as e:
         raise BuildError(f"{what}：逾時（{timeout:.0f}s）") from e
     if result.returncode != 0:
-        raise BuildError(f"{what}：失敗（exit={result.returncode}）\n{result.stderr}")
+        raise BuildError(f"{what}：失敗（exit={result.returncode}）\n{result.stderr or result.stdout}")
     return result.stdout
 
 
@@ -588,6 +569,59 @@ def release_zip_name(version: str) -> str:
     return f"{RELEASE_SLUG}-v{version}.zip"
 
 
+def write_nsis_uninstall_manifest(bundle: Path, manifest: Path) -> None:
+    """只卸載出貨清單上的檔案，其他檔案及非空目錄原地保留。"""
+    entries = sorted(bundle.rglob("*"))
+    for entry in entries:
+        name = entry.name.casefold()
+        if (
+            name == ".env"
+            or name.startswith(".env.")
+            or name == ".runtime"
+            or entry.suffix.casefold() in {".pfx", ".p12", ".key", ".ppk", ".log"}
+        ):
+            raise BuildError("NSIS 暫存來源含使用者資料或執行紀錄，已停止打包")
+        if entry.is_symlink() or entry.is_junction() or "$" in entry.name:
+            raise BuildError("NSIS 暫存來源含連結或不支援的檔名，已停止打包")
+    files = [entry for entry in entries if entry.is_file()]
+    dirs = sorted(
+        (entry for entry in entries if entry.is_dir()),
+        key=lambda entry: (len(entry.parts), entry),
+        reverse=True,
+    )
+    commands = [
+        f'  {command} "$INSTDIR\\${{APP_DIR}}\\{entry.relative_to(bundle)}"'
+        for command, paths in (("Delete", files), ("RMDir", dirs))
+        for entry in paths
+    ]
+    manifest.write_text("\n".join(commands) + "\n", encoding="utf-8-sig")
+
+
+def compile_nsis_installer(bundle: Path, installer: Path, version: str, *, makensis: Path) -> None:
+    manifest = installer.parent / "uninstall-payload.nsh"
+    marker = installer.parent / INSTALLER_MARKER
+    script = Path(__file__).with_name("installer.nsi")
+    write_nsis_uninstall_manifest(bundle, manifest)
+    marker.write_text("ShioajiWizard\n", encoding="ascii")
+    run_step(
+        [
+            str(makensis),
+            "/INPUTCHARSET",
+            "UTF8",
+            f"/DAPP_VERSION={version}",
+            f"/DPAYLOAD={bundle}",
+            f"/DUNINSTALL_MANIFEST={manifest}",
+            f"/DINSTALLER_MARKER={marker}",
+            f"/DOUTPUT_EXE={installer}",
+            str(script),
+        ],
+        timeout=300,
+        what="NSIS 編譯",
+    )
+    if not installer.is_file():
+        raise BuildError("NSIS 未產出安裝程式")
+
+
 def finalize(tmp_bundle: Path, final: Path, *, make_zip: bool, version: str = "") -> None:
     """交易式收尾：``verify_bundle``（若有）都在 tmp bundle 上先跑過、全過
     才呼叫本函式。舊 bundle 先改名挪開 → promote 新 bundle → 最後才刪舊。
@@ -729,20 +763,21 @@ def clean_runtime(bundle: Path) -> None:
         shutil.rmtree(rt, ignore_errors=True)
 
 
-def verify_bundle(bundle: Path) -> None:
+def verify_bundle(bundle: Path, *, root: Path, log_path: Path) -> None:
     """乾淨環境 smoke：隔離 PATH（bundle python＋``C:\\Windows\\System32``＋
     ``%SystemRoot%``）起 ``-m shioaji_wizard --no-shell`` → 首頁 200 →
     ``/api/state`` 200（含 JSON、``root`` 鍵）→ idle 逾時優雅自關、零殘留
     → 頂層只多出 ``.runtime``（且已 hidden）。
 
     刻意不碰任何會連永豐的東西：不送 ``/api/env``、不啟動任何測試 job。
-    伺服器輸出落 ``dist/<bundle 名>-verify.log``（DIST_DIR 根，非
-    ``bundle.parent``，因 bundle 為 tmp 路徑、成功後會被 cleanup 清掉，
-    log 需存活）；失敗訊息附 log（尾段）。"""
+    ``root`` 是隔離測試資料目錄，安裝版不會把執行資料放到程式目錄。"""
     port = _free_port()
     base = f"http://127.0.0.1:{port}"
-    log_path = DIST_DIR / f"{bundle.name}-verify.log"
-    before = {p.name for p in bundle.iterdir()}
+    before = {p.name for p in root.iterdir()}
+    home = bundle.parent / "verify-home"
+    home.mkdir(exist_ok=True)
+    env = isolated_env(bundle)
+    env.update(USERPROFILE=str(home), HOME=str(home), SJ_EKEY_BASE=str(home / "no-ekey"))
     log_f = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         [
@@ -753,12 +788,12 @@ def verify_bundle(bundle: Path) -> None:
             "--port",
             str(port),
             "--root",
-            str(bundle),
+            str(root),
             "--idle-timeout",
             "20",
         ],
-        env=isolated_env(bundle),
-        cwd=bundle,
+        env=env,
+        cwd=root,
         stdout=log_f,
         stderr=subprocess.STDOUT,
     )
@@ -795,22 +830,73 @@ def verify_bundle(bundle: Path) -> None:
         if proc.poll() is None:
             proc.kill()
         log_f.close()
-    after = {p.name for p in bundle.iterdir()}
+    after = {p.name for p in root.iterdir()}
     new_entries = after - before
     if new_entries != {".runtime"}:
         raise BuildError(
             f"verify：跑完後頂層新增項目非預期（預期僅 .runtime，實際："
             f"{sorted(new_entries)}；log：{log_path}）"
         )
-    if not _is_hidden(bundle / ".runtime"):
+    if not _is_hidden(root / ".runtime"):
         raise BuildError("verify：.runtime 未設 hidden 屬性")
     print("verify PASS：首頁／/api/state／自動收攤／.runtime 隱藏 全數通過")
 
 
+def verify_installer(installer: Path, version: str, test_dir: Path, log_path: Path) -> None:
+    """無捷徑／登錄副作用的實際安裝、離線啟動、重裝及解除安裝。"""
+    root = test_dir / "isolated-install"
+    root.mkdir(parents=True)
+    # NSIS 的 /D 與 _?= 要放在最後，路徑含空白也不能加引號。
+    install = subprocess.list2cmdline([str(installer), "/S", "/NOINTEGRATION"]) + f" /D={root}"
+    run_step(install, timeout=120, what="NSIS 安裝驗證")
+    app_dir = root / f"app-{version}"
+    data_dir = root / "data"
+    data_dir.mkdir()
+    if not (app_dir / INSTALLER_MARKER).is_file() or not (app_dir / LAUNCHER_EXE_NAME).is_file():
+        raise BuildError("NSIS 安裝驗證：缺少安裝識別或啟動器")
+    if list(app_dir.rglob(".env")) or list(app_dir.rglob("*.pfx")):
+        raise BuildError("NSIS 安裝驗證：安裝內容不應含使用者設定或憑證")
+    verify_bundle(app_dir, root=data_dir, log_path=log_path)
+    sdk_version = run_step(
+        [
+            str(app_dir / "python" / "python.exe"),
+            "-c",
+            "import shioaji._core; from importlib.metadata import version; print(version('shioaji'))",
+        ],
+        env=isolated_env(app_dir),
+        cwd=data_dir / ".runtime",
+        timeout=30,
+        what="內嵌 Shioaji SDK 匯入",
+    ).strip()
+
+    # 模擬測試工作目錄內各自存放的設定與憑證，不使用任何真實交易資料。
+    env_file = data_dir / ".env"
+    pfx_file = data_dir / "fixture.pfx"
+    env_file.write_bytes(b"verification-only\n")
+    pfx_file.write_bytes(b"verification-only")
+    run_step(install, timeout=120, what="NSIS 重裝驗證")
+    if env_file.read_bytes() != b"verification-only\n" or pfx_file.read_bytes() != b"verification-only":
+        raise BuildError("NSIS 重裝驗證：使用者檔案遭修改")
+    uninstaller = test_dir / UNINSTALLER_EXE_NAME
+    shutil.copyfile(root / UNINSTALLER_EXE_NAME, uninstaller)
+    uninstall = subprocess.list2cmdline([str(uninstaller), "/S", "/NOINTEGRATION"]) + f" _?={root}"
+    run_step(uninstall, timeout=120, what="NSIS 解除安裝驗證")
+    if (
+        app_dir.exists()
+        or env_file.read_bytes() != b"verification-only\n"
+        or pfx_file.read_bytes() != b"verification-only"
+    ):
+        raise BuildError("NSIS 解除安裝驗證：程式檔未移除或使用者資料遭修改")
+    print(f"NSIS verify PASS：安裝、Shioaji {sdk_version}、重裝、解除安裝及使用者資料保留")
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="portable bundle 打包（開發機工具）")
-    parser.add_argument("--zip", action="store_true", help="另產 ASCII 檔名 zip（發布用）")
-    parser.add_argument("--verify", action="store_true", help="build 後接乾淨環境 smoke 驗收")
+    parser = argparse.ArgumentParser(description="Shioaji 測試精靈 Windows 安裝程式打包")
+    parser.add_argument("--zip", action="store_true", help="另外產出 portable zip（開發相容用途）")
+    parser.add_argument("--verify", action="store_true", help="build 後接乾淨環境驗收")
+    parser.add_argument("--portable-only", action="store_true", help="只產出 portable 資料夾")
+    parser.add_argument("--dist-dir", type=Path, default=DIST_DIR, help="輸出目錄，預設 dist")
+    parser.add_argument("--makensis", type=Path, help="makensis.exe 路徑，預設從 PATH 尋找")
     parser.add_argument(
         "--allow-oversize",
         action="store_true",
@@ -821,7 +907,12 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.monotonic()
     version = preflight()
     name = bundle_name(version)
-    tmp_root = DIST_DIR / ".tmp"
+    dist_dir = args.dist_dir.resolve()
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    makensis = args.makensis or shutil.which("makensis")
+    if not args.portable_only and not makensis:
+        raise BuildError("找不到 makensis.exe，請安裝 NSIS 或用 --makensis 指定官方可攜編譯器")
+    tmp_root = dist_dir / ".tmp"
     if tmp_root.exists():
         shutil.rmtree(tmp_root)  # 上次失敗的驗屍現場，此刻才清
     bundle = tmp_root / name
@@ -837,8 +928,8 @@ def main(argv: list[str] | None = None) -> int:
     n_pycache = sweep_pycache(bundle)
     print(f"瘦身：另清 __pycache__ {n_pycache} 處（runtime 複製帶入的既有 .pyc）")
     write_static_files(bundle, version)
-    if args.verify:
-        verify_bundle(bundle)  # tmp bundle 上先驗，全過才 promote
+    if args.verify and args.portable_only:
+        verify_bundle(bundle, root=bundle, log_path=dist_dir / f"{name}-verify.log")
         clean_runtime(bundle)  # verify 會留下 .runtime（.app-ready／.app-status／app.log），出貨要乾淨
     hidden = hide_bundle_top_level(bundle, keep=LAUNCHER_EXE_NAME)
     print(f"隱藏：頂層設 hidden {len(hidden)} 項（{'、'.join(hidden)}）")
@@ -847,7 +938,14 @@ def main(argv: list[str] | None = None) -> int:
     stray_pyc = [p for p in bundle.rglob("__pycache__") if p.is_dir()]
     if stray_pyc:
         raise BuildError(f"bundle 內仍有 __pycache__（{len(stray_pyc)} 處）——PYTHONDONTWRITEBYTECODE 失效？")
-    final = DIST_DIR / name
+    if makensis and not args.portable_only:
+        staged_installer = aux / INSTALLER_EXE_NAME
+        compile_nsis_installer(bundle, staged_installer, version, makensis=Path(makensis).resolve())
+        if args.verify:
+            verify_installer(staged_installer, version, aux, dist_dir / f"{name}-verify.log")
+        os.replace(staged_installer, dist_dir / INSTALLER_EXE_NAME)
+        print(f"安裝程式完成：{dist_dir / INSTALLER_EXE_NAME}")
+    final = dist_dir / name
     finalize(bundle, final, make_zip=args.zip, version=version)
     shutil.rmtree(tmp_root, ignore_errors=True)  # 成功後清 aux
     if tmp_root.exists():

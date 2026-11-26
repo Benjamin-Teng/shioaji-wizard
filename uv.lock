@@ -294,23 +294,23 @@ wheels = [
 
 [[package]]
 name = "shioaji"
-version = "1.7.3"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/85/1d4f84255db0943c72418cdb8595978f33550ce1cffedb3d470f173a7b41/shioaji-1.7.3-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:06953bf9f252149be33986650152d790d758217ecc4fe4decc54360e6b01f082", size = 41890546, upload-time = "2026-08-20T07:29:28.765Z" },
-    { url = "https://files.pythonhosted.org/packages/fa/77/c7670b0ec102c5296a1bd37e3c3877f040df35201e746c848b5b51003b68/shioaji-1.7.3-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:91833a0d18a7081da866dbb57e8c382d862b23a4260918e0b002c3b6876eb274", size = 38687626, upload-time = "2026-08-20T07:31:50.603Z" },
-    { url = "https://files.pythonhosted.org/packages/9a/90/2c0fe47bbfc3af30e008db73cdcac625a4f4d4c0f4f95827fb2fa1089b22/shioaji-1.7.3-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1c9227d5524fde70d465fb8ede05409a992925b9551cf190cb796f6d2608e5a0", size = 43672932, upload-time = "2026-08-20T07:31:11.677Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/32/c9b308f873d7d583e5440ba0d4ef995b8d18deee9b62eb16a235029c5bff/shioaji-1.7.3-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:046b7f9af6bc3d775693bb2a0931e8cca492538f6a4f11f9d3ae1ac26384e0e7", size = 40869726, upload-time = "2026-08-20T07:30:53.121Z" },
-    { url = "https://files.pythonhosted.org/packages/9c/69/e61c2dde258eb976bfcd5740e10be0d56dc22ede282d87da6b2fb90038a9/shioaji-1.7.3-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:7a917da7cea77dbe7954d452174e12e9671a06fa3d65fa11fd0dbc5b67521c4e", size = 41920065, upload-time = "2026-08-20T07:32:16.233Z" },
-    { url = "https://files.pythonhosted.org/packages/52/c7/3f241f797f5c6f6db8a809cab5f584d05ab28ca3d1f782091b2de24302ce/shioaji-1.7.3-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:c685855f55514814f523242d453414e258be15c9be2d754d4afa86f828f61ede", size = 38700449, upload-time = "2026-08-20T07:30:08.113Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/fb/c06e0ff59ba20dde27ebf147ed263763c35331f072bb5e81021dee093220/shioaji-1.7.3-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fb08c627becb73abada9a5bcc7ef866aaf028040ac0704d6d3fb91ef744f0879", size = 43662922, upload-time = "2026-08-20T07:30:34.577Z" },
-    { url = "https://files.pythonhosted.org/packages/49/cd/5e1a27c06ed661e554f67f48c0f3ed68baac079689e9a5d025bdbc0d15e3/shioaji-1.7.3-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:0c476db255d8a8838bd27a631a3fa34f85b8c47ff22d404c4c4d3d685571b09c", size = 40863391, upload-time = "2026-08-20T07:31:28.334Z" },
-    { url = "https://files.pythonhosted.org/packages/28/fb/a9af1ae2b81372548e29aac4d55386062ccb4a1920985838903ee6fa3510/shioaji-1.7.3-cp37-abi3-win_amd64.whl", hash = "sha256:02d1b71aabccec8e5911d71d0f52c7937bf3f22994d1fb20f7d9ace65830dd0c", size = 45923825, upload-time = "2026-08-20T07:29:50.32Z" },
+    { url = "https://files.pythonhosted.org/packages/58/6a/101cf93717fc26335a37bc21935e10af3154298d83403b65ff3fff2c9079/shioaji-1.8.0-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:348a7f1cfbd185f885134c0d9c7407178000bc1f880b9f2ac2b2c7148a7354ac", size = 15061049, upload-time = "2026-11-26T07:24:45.381Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/49/b8f19ef4fa5ffc14b30e168fb963d91fc2a54345d0d7e5e13999b04b4960/shioaji-1.8.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:63b70dadd9763b44f069633d5ad12f4e2298f591de6b7b34348c5486147655a9", size = 13975235, upload-time = "2026-11-26T07:25:49.397Z" },
+    { url = "https://files.pythonhosted.org/packages/37/70/9435f6e0341c02bbb82f3d405709b3a36ca474e45c97c0d65beae7faf44e/shioaji-1.8.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:fc9fdd13da8de060edecca94fa4be4595ec6e116fbbf82494b559d74a9c7ff44", size = 15755344, upload-time = "2026-11-26T07:24:59.826Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/1f/a91e90628dcee980a8aad17a955a6cd859e62e698ebc00a6fa9328f13596/shioaji-1.8.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:73d4535f032592515c5ee65fc74f0e229f49a2f3d693bd908790a7769424885a", size = 14934082, upload-time = "2026-11-26T07:24:52.996Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/0e/8149d644f1902dc230e1d2fdfc9a34072ab2a288e780f5de33590e55c9cd/shioaji-1.8.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:0dfaceea0379ecdce297af3cff8dd6bf0ded17d965c736831adcb0aeaad7d71e", size = 36239174, upload-time = "2026-11-26T07:23:53.935Z" },
+    { url = "https://files.pythonhosted.org/packages/88/37/fcb963318cbfb2222d7119fdab41a6a1667b681913b5b536fde7dc03d07e/shioaji-1.8.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:49c121ba03e4b738c50df38f65ab396f79e9a2c897f79e165ba47dee8b60d264", size = 33599650, upload-time = "2026-11-26T07:25:41.711Z" },
+    { url = "https://files.pythonhosted.org/packages/45/d7/a36c48eaf7ecc7a1782ca61b21a362804981602c197fa2d85d0e31c8a105/shioaji-1.8.0-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:eab4435d3c536cf5145081ae08001ac7eeb8fe6f7dc73a386704131e97e4c1e4", size = 37804241, upload-time = "2026-11-26T07:24:38.198Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/8e/258abe0332fc39ab43e48b50c70a808e439c530e1aaeb6be4351a0961fbf/shioaji-1.8.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:ca456560ea27e2d515a8f40d8227cbd0e1bc853af3478eccf725c654e515f093", size = 35620022, upload-time = "2026-11-26T07:24:23.057Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/70/8c5116adbb706ab1fa5da6a3bcbaf4a67fa90863404269224ae57c291dd8/shioaji-1.8.0-cp37-abi3-win_amd64.whl", hash = "sha256:5ac8490e839a367d4f7ece48b895c8a449caf8231e83fc6dd152d4f4421bbaf7", size = 39586237, upload-time = "2026-11-26T07:25:25.708Z" },
 ]
 
 [[package]]
 name = "shioaji-wizard"
-version = "0.1.4"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -329,7 +329,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "shioaji", specifier = ">=1.7.3" },
+    { name = "shioaji", specifier = "==1.8.0" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 

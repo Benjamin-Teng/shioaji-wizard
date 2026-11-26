@@ -24,6 +24,38 @@ class TestBundleName:
         assert bb.bundle_name("1.0.0").isascii()
 
 
+class TestNsisInstaller:
+    def test_release_asset_name_is_stable(self):
+        assert bb.INSTALLER_EXE_NAME == "shioaji-wizard-setup.exe"
+
+    @pytest.mark.parametrize(
+        "name", [".env", ".ENV.backup", "certificate.PFX", "identity.p12", "private.key", "app.log"]
+    )
+    def test_rejects_sensitive_payload_at_any_depth(self, tmp_path, name):
+        bundle = tmp_path / "payload"
+        candidate = bundle / "python" / "nested" / name
+        candidate.parent.mkdir(parents=True)
+        candidate.write_text("local fixture", encoding="utf-8")
+
+        with pytest.raises(bb.BuildError, match="使用者資料"):
+            bb.write_nsis_uninstall_manifest(bundle, tmp_path / "remove.nsh")
+
+    def test_uninstall_manifest_only_deletes_bundled_paths_and_empty_directories(self, tmp_path):
+        bundle = tmp_path / "payload"
+        leaf = bundle / "python" / "Lib" / "known.dll"
+        leaf.parent.mkdir(parents=True)
+        leaf.write_bytes(b"test")
+        manifest = tmp_path / "remove.nsh"
+
+        bb.write_nsis_uninstall_manifest(bundle, manifest)
+
+        assert manifest.read_text(encoding="utf-8-sig").splitlines() == [
+            r'  Delete "$INSTDIR\${APP_DIR}\python\Lib\known.dll"',
+            r'  RMDir "$INSTDIR\${APP_DIR}\python\Lib"',
+            r'  RMDir "$INSTDIR\${APP_DIR}\python"',
+        ]
+
+
 class TestParseSemver:
     def test_strips_v_prefix(self):
         assert bb.parse_semver("v1.2.3") == (1, 2, 3)
@@ -65,6 +97,7 @@ class TestRenderers:
         content.encode("ascii")  # 內容必須全 ASCII（codepage 雷）
         assert "python\\python.exe" in content
         assert "-m shioaji_wizard --root" in content
+        assert 'set "PYTHONDONTWRITEBYTECODE=1"' in content
         assert "pause" in content
 
     def test_readme_carries_version_and_key_facts(self):
@@ -74,10 +107,10 @@ class TestRenderers:
         assert "SmartScreen" in text
         assert "Sinopac.pfx" in text
 
-    def test_readme_documents_durable_smartscreen_unblock(self):
+    def test_readme_recommends_verifying_origin_and_release_checksum(self):
         text = bb.render_readme("1.0.0")
-        assert "解除封鎖" in text
-        assert "Mark of the Web" in text
+        assert "github.com/Benjamin-Teng/shioaji-wizard/releases/latest" in text
+        assert "SHA-256" in text
         assert "僅此一次" not in text
 
     def test_readme_warns_against_cloud_sync_folders(self):

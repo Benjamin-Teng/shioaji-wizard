@@ -158,6 +158,30 @@ def test_b_missing_stock_account_is_failure_not_skip():
     assert rep.all_passed is False
 
 
+@pytest.mark.parametrize(
+    ("selected", "intl_signing", "expected"),
+    [
+        (False, [False], "SKIP"),
+        (True, [], "FAIL"),
+        (True, [True], "PASS"),
+        (True, [True, False], "FAIL"),
+    ],
+)
+def test_b_intl_checks_only_intl_signing(selected, intl_signing, expected):
+    accounts = [SimpleNamespace(account_type="S", signed=True)]
+    accounts += [
+        SimpleNamespace(account_type=SimpleNamespace(value="H"), signed=signed) for signed in intl_signing
+    ]
+    rep = Report()
+
+    test_ca.record_signing_results(rep, accounts, want_futures=False, want_intl=selected)
+
+    intl = [item for item in rep.items if item["name"] == "B7 美股複委託帳戶簽署狀態"]
+    assert [item["status"] for item in intl] == [expected]
+    if selected and not intl_signing:
+        assert "複委託海外帳戶" in intl[0]["reason"]
+
+
 def test_ca_expiry_classification_uses_earliest_account_and_warns_below_30_days():
     now = datetime(2026, 8, 29, 12, tzinfo=UTC)
 
@@ -281,7 +305,7 @@ def test_build_offline_diagnostic_without_mismatch_only_reports_expiry():
 
 
 @pytest.mark.parametrize("activate", ["raises", "false"])
-def test_b_main_records_all_six_items_once_when_offline_unavailable_and_activate_fails(
+def test_b_main_records_all_seven_items_once_when_offline_unavailable_and_activate_fails(
     monkeypatch, tmp_path, activate
 ):
     """離線讀取不可用＋B5 啟用失敗：B6 要記成 SKIP，不能整列從檢核單消失。"""
@@ -340,6 +364,7 @@ def test_b_main_records_all_six_items_once_when_offline_unavailable_and_activate
         test_ca.B_PFX,
         test_ca.B_ACTIVATE,
         test_ca.B_EXPIRE,
+        "B7 美股複委託帳戶簽署狀態",
     ]
     assert sorted(names) == sorted(expected)
     status = {item["name"]: item["status"] for item in recorded[0].items}
@@ -347,7 +372,7 @@ def test_b_main_records_all_six_items_once_when_offline_unavailable_and_activate
     assert status[test_ca.B_EXPIRE] == "SKIP"
 
 
-def test_b_main_records_all_six_items_when_shioaji_constructor_fails(monkeypatch, tmp_path):
+def test_b_main_records_all_seven_items_when_shioaji_constructor_fails(monkeypatch, tmp_path):
     """Shioaji() 建構就失敗（native runtime 壞掉）：六項仍各記一次，不是程式直接炸掉。"""
     import sys
 
@@ -386,6 +411,7 @@ def test_b_main_records_all_six_items_when_shioaji_constructor_fails(monkeypatch
             test_ca.B_PFX,
             test_ca.B_ACTIVATE,
             test_ca.B_EXPIRE,
+            "B7 美股複委託帳戶簽署狀態",
         ]
     )
 
@@ -396,12 +422,14 @@ _ALL_A = [
     test_sim_order.A_STOCK_ORDER,
     test_sim_order.A_FUT_ACC,
     test_sim_order.A_FUT_ORDER,
+    "A6 美股複委託帳戶",
+    "A7 美股複委託模擬下單",
 ]
 
 
 @pytest.mark.parametrize("failure", ["no_keys", "import", "constructor", "login"])
-def test_a_main_records_all_five_items_once_on_every_early_exit(monkeypatch, failure):
-    """A1 之前／當下任何失敗，檢核單仍固定五列（A2–A5 補 SKIP），不是只剩 A1。"""
+def test_a_main_records_all_seven_items_once_on_every_early_exit(monkeypatch, failure):
+    """A1 失敗時仍為每個後續檢查各記一列 SKIP。"""
     import sys
 
     recorded: list[Report] = []
@@ -433,7 +461,7 @@ def test_a_main_records_all_five_items_once_on_every_early_exit(monkeypatch, fai
     )
     monkeypatch.setattr(test_sim_order, "Report", SpyReport)
     monkeypatch.setattr(test_sim_order, "load_env", lambda: env)
-    monkeypatch.setattr(sys, "argv", ["test_sim_order"])
+    monkeypatch.setattr(sys, "argv", ["test_sim_order", "--intl"])
 
     assert test_sim_order.main() != 0
 
@@ -441,6 +469,136 @@ def test_a_main_records_all_five_items_once_on_every_early_exit(monkeypatch, fai
     status = {item["name"]: item["status"] for item in recorded[0].items}
     assert status[test_sim_order.A_LOGIN] == "FAIL"
     assert all(status[n] == "SKIP" for n in _ALL_A[1:])
+
+
+def test_intl_simulation_uses_installed_sdk_contract_v2(monkeypatch, tmp_path):
+    """離線檢查實際 SDK，不以內容不符的型別檔或測試假物件代替。"""
+    from decimal import Decimal
+    from inspect import signature
+
+    monkeypatch.chdir(tmp_path)  # SDK 可能在 cwd 建立 shioaji.log
+    import shioaji as sj
+    from shioaji import _core
+
+    assert "contracts v2" in sj.Shioaji.contracts.__doc__
+    lookup = _core.ContractsApi.get
+    assert "api.contracts.get(code, region=None" in lookup.__doc__
+    assert signature(lookup).bind(object(), "AAPL", region="US").arguments["region"] == "US"
+    order = sj.StockOrder(
+        action="Buy", price=Decimal("180.25"), quantity=1, price_type="LMT", time_in_force="DAY"
+    )
+    assert (sj.AccountType.Intl.value, order.price, order.quantity, order.time_in_force.value) == (
+        "H",
+        Decimal("180.25"),
+        1,
+        "DAY",
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "account_status", "order_status"),
+    [
+        ("disabled", "SKIP", "SKIP"),
+        ("missing_account", "FAIL", "SKIP"),
+        ("missing_contract", "PASS", "FAIL"),
+        ("submit_timeout", "PASS", "UNKNOWN"),
+        ("submit_outcome_unknown", "PASS", "UNKNOWN"),
+        ("PendingSubmit", "PASS", "UNKNOWN"),
+        ("query_failed", "PASS", "UNKNOWN"),
+        ("accepted_after_wait", "PASS", "PASS"),
+        ("Failed", "PASS", "FAIL"),
+        ("Submitted", "PASS", "PASS"),
+        ("Filled", "PASS", "PASS"),
+    ],
+)
+def test_intl_simulation_records_account_and_order(monkeypatch, outcome, account_status, order_status):
+    import sys
+    from decimal import Decimal
+
+    intl = SimpleNamespace(account_type="H", broker_id="test", account_id="intl")
+    accounts = [] if outcome == "missing_account" else [intl]
+    contract = object()
+    submitted = []
+    status_queries = []
+    result = Report()
+    status_names = ("PendingSubmit", "PreSubmitted", "Submitted", "Filled", "PartFilled")
+    initial_status = "PendingSubmit" if outcome in {"query_failed", "accepted_after_wait"} else outcome
+    trade = SimpleNamespace(status=SimpleNamespace(status=initial_status, msg="rejected"))
+
+    class FakeOrderOutcomeUnknown(Exception):
+        pass
+
+    def get_contract(code, *, region):
+        assert (code, region) == ("AAPL", "US")
+        return None if outcome == "missing_contract" else contract
+
+    def place_order(actual_contract, order):
+        assert actual_contract is contract
+        submitted.append(order)
+        if outcome == "submit_timeout":
+            raise TimeoutError
+        if outcome == "submit_outcome_unknown":
+            raise FakeOrderOutcomeUnknown
+        return trade
+
+    def update_status(*, trade, timeout):
+        status_queries.append((trade, timeout))
+        if outcome == "query_failed":
+            raise TimeoutError
+        if outcome == "accepted_after_wait":
+            trade.status.status = "Submitted"
+
+    api = SimpleNamespace(
+        login=lambda *_: accounts,
+        logout=lambda: None,
+        stock_account=None,
+        contracts=SimpleNamespace(get=get_contract),
+        place_order=place_order,
+        update_status=update_status,
+    )
+
+    def simulated_api(*, simulation):
+        assert simulation is True
+        return api
+
+    sdk = SimpleNamespace(
+        Shioaji=simulated_api,
+        AccountType=SimpleNamespace(Intl="H"),
+        StockOrder=dict,
+        OrderOutcomeUnknownError=FakeOrderOutcomeUnknown,
+        OrderStatus=SimpleNamespace(**{name: name for name in status_names}),
+    )
+    monkeypatch.setitem(sys.modules, "shioaji", sdk)
+    monkeypatch.setattr(sys, "argv", ["test_sim_order"] + ([] if outcome == "disabled" else ["--intl"]))
+    monkeypatch.setattr(test_sim_order, "load_env", lambda: {"SJ_API_KEY": "k", "SJ_SEC_KEY": "s"})
+    monkeypatch.setattr(test_sim_order, "Report", lambda: result)
+    monkeypatch.setattr(test_sim_order.time, "sleep", lambda _: None)
+    ticks = iter((0, 20))
+    monkeypatch.setattr(test_sim_order.time, "monotonic", lambda: next(ticks))
+
+    test_sim_order.main()
+
+    assert [item["name"] for item in result.items] == _ALL_A
+    assert [i["status"] for i in result.items[-2:]] == [account_status, order_status]
+    assert status_queries == ([(trade, 5000)] if initial_status == "PendingSubmit" else [])
+    if outcome in {"disabled", "missing_account", "missing_contract"}:
+        assert submitted == []
+    else:
+        assert submitted == [
+            dict(
+                action="Buy",
+                price=Decimal("180.25"),
+                quantity=1,
+                price_type="LMT",
+                time_in_force="DAY",
+                account=intl,
+            )
+        ]
+    if order_status == "UNKNOWN":
+        assert "未收到" in result.items[-1]["reason"]
+        assert "先到模擬環境查閱委託紀錄" in result.items[-1]["reason"]
+    if outcome == "Failed":
+        assert "rejected" in result.items[-1]["reason"]
 
 
 @pytest.mark.parametrize("order", ["aware_first", "naive_first"])

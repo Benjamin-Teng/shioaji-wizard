@@ -2,8 +2,8 @@
 
 只登入、啟用憑證、查詢；不下單。金鑰與憑證密碼從 .env 讀，不印出來。
 結束時列出每一項測試通過／未通過與原因。
-用法：由精靈／GUI 呼叫；或  uv run python -m shioaji_wizard.test_ca [--futures]
-（--futures：也檢查期貨帳戶 signed；沒帶時 B3 標「未要求」）
+用法：由精靈／GUI 呼叫；或  uv run python -m shioaji_wizard.test_ca [--futures] [--intl]
+（--futures 檢查期貨帳戶簽署，--intl 檢查美股複委託帳戶簽署）
 
 B4（憑證檔存在）與 B6（憑證到期日）改用 certinfo.read_pfx_info 離線解析，永遠
 排在登入之前先做，不受 B1 登入／B5 activate_ca 成不成功影響——使用者實測發現
@@ -33,10 +33,11 @@ B_FUT_SIGNED = "B3 期貨 API 簽署＋模擬測試審核（signed）"
 B_PFX = "B4 憑證檔存在（SJ_CA_PATH）"
 B_ACTIVATE = "B5 憑證啟用（憑證密碼）"
 B_EXPIRE = "B6 憑證有效期"
-ALL_B = (B_LOGIN, B_STOCK_SIGNED, B_FUT_SIGNED, B_PFX, B_ACTIVATE, B_EXPIRE)
+B_INTL_SIGNED = "B7 美股複委託帳戶簽署狀態"
+ALL_B = (B_LOGIN, B_STOCK_SIGNED, B_FUT_SIGNED, B_PFX, B_ACTIVATE, B_EXPIRE, B_INTL_SIGNED)
 
 # 登入失敗／缺金鑰時才會被跳過的項目——B4／B6 已改成離線先做，不受登入影響。
-_SKIP_ON_NO_LOGIN = (B_STOCK_SIGNED, B_FUT_SIGNED, B_ACTIVATE)
+_SKIP_ON_NO_LOGIN = (B_STOCK_SIGNED, B_FUT_SIGNED, B_ACTIVATE, B_INTL_SIGNED)
 
 NOT_SIGNED_STOCK = (
     "證券帳戶 signed=False：①證券 API 約定書未簽署（簽署頁 "
@@ -54,7 +55,7 @@ _TAIWAN_ID_RE = re.compile(r"[A-Z][A-Z0-9]\d{8}")
 
 
 def acct_type(acc) -> str:
-    """帳戶類型字串：S=證券、F=期貨（account_type 是 enum，取 value）。"""
+    """帳戶類型字串：S 為證券、F 為期貨、H 為複委託。"""
     t = acc.account_type
     return str(getattr(t, "value", t))
 
@@ -76,8 +77,10 @@ def explain_ca_error(e: Exception) -> str:
     return f"憑證啟用失敗（{name}: {msg[:160]}）；可能憑證與此帳號不符、已過期或檔案損毀，請到 API 管理頁重新下載"
 
 
-def record_signing_results(rep: Report, accounts: list, *, want_futures: bool) -> None:
-    """記錄證券／期貨 signed 狀態；證券是本流程必要帳戶。"""
+def record_signing_results(
+    rep: Report, accounts: list, *, want_futures: bool, want_intl: bool = False
+) -> None:
+    """記錄正式登入回傳的帳戶簽署狀態。"""
     stock_accs = [a for a in accounts if acct_type(a) == "S"]
     fut_accs = [a for a in accounts if acct_type(a) == "F"]
     if not stock_accs:
@@ -87,13 +90,24 @@ def record_signing_results(rep: Report, accounts: list, *, want_futures: bool) -
     else:
         rep.fail(B_STOCK_SIGNED, NOT_SIGNED_STOCK)
     if not want_futures:
-        rep.skip(B_FUT_SIGNED, "未要求測期貨（只做證券可忽略；要測請按「也測期貨／選擇權」）")
+        rep.skip(B_FUT_SIGNED, "未選擇檢查期貨／選擇權")
     elif not fut_accs:
         rep.fail(B_FUT_SIGNED, f"{missing_account_reason('期貨')}；只做證券請不要勾期貨")
     elif all(a.signed for a in fut_accs):
         rep.ok(B_FUT_SIGNED)
     else:
         rep.fail(B_FUT_SIGNED, NOT_SIGNED_FUT)
+
+    if not want_intl:
+        rep.skip(B_INTL_SIGNED, "未選擇檢查美股複委託")
+        return
+    intl_accs = [a for a in accounts if acct_type(a) == "H"]
+    if not intl_accs:
+        rep.fail(B_INTL_SIGNED, f"{missing_account_reason('美股複委託')}是否已勾選「複委託海外帳戶」")
+    elif all(a.signed for a in intl_accs):
+        rep.ok(B_INTL_SIGNED, "永豐已回傳美股複委託帳戶，簽署狀態已通過")
+    else:
+        rep.fail(B_INTL_SIGNED, "永豐回傳的美股複委託帳戶有未完成的簽署狀態，請向永豐確認")
 
 
 _TW_TZ = timezone(timedelta(hours=8))
@@ -211,6 +225,7 @@ def main() -> int:
     rep = Report()
     env = load_env()
     want_futures = "--futures" in sys.argv
+    want_intl = "--intl" in sys.argv
 
     # ---- B4／B6：離線先做，永遠不受登入／B5 activate_ca 影響 ----
     ca_path = pfx_path(env)
@@ -267,10 +282,10 @@ def main() -> int:
             return 1
         rep.ok(B_LOGIN, f"{len(accounts)} 個帳戶")
 
-        # ---- signed：證券／期貨各自判斷 ----
+        # ---- 依市場檢查正式環境回傳的簽署狀態 ----
         for acc in accounts:
             print(f"      {acc.account_type} {acc.broker_id}-{acc.account_id} signed={acc.signed}")
-        record_signing_results(rep, accounts, want_futures=want_futures)
+        record_signing_results(rep, accounts, want_futures=want_futures, want_intl=want_intl)
 
         # ---- 啟用憑證（B4／B6 已離線做完，這裡只管 B5） ----
         if not ca_path.is_file():

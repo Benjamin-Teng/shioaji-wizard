@@ -1,24 +1,17 @@
 # shioaji-wizard
 
 > **一般使用者請到下載頁：<https://benjamin-teng.github.io/shioaji-wizard/>**
-> （免裝 Python，解壓後雙擊 `wizard.exe`）。以下為開發文件。
+> （下載並執行 Windows 安裝程式，免裝 Python）。以下為開發文件。
 
-永豐 Shioaji 開通測試精靈：本機 FastAPI 後端＋系統 Chromium `--app` 殼的
-一頁式桌面工具，給完全不懂技術的使用者完成永豐 API 開通必經的「模擬下單
-測試」（A）與「正式環境憑證測試」（B），逐項列出通過／未通過與原因。設定存成
-`.env`（`SJ_API_KEY`／`SJ_SEC_KEY`／`SJ_CA_PASSWD`／`SJ_CA_PATH`），欄位名稱與
-Shioaji Pro／`shioaji server` 相同、可直接沿用——**`.env` 實際位置跟著選用的
-憑證走**：選用永豐 eLeader 憑證（`C:\ekey\551\(身分證字號)\S`）時，`.env` 存在
-那個憑證資料夾，讓每個身分證字號各自一份設定；其他位置的憑證（含程式同層的
-`Sinopac.pfx`）則存在程式同層，畫面上永遠會顯示目前這份 `.env` 的完整路徑
-（身分證字號打碼），照畫面顯示的位置設定 Shioaji Pro／`shioaji server` 即可。
-憑證檔欄預設留空（＝同資料夾的 `Sinopac.pfx`）。偵測到的 eLeader 憑證會常駐列
-成畫面上的「帳號」清單（身分證字號打碼），可隨時點選切換；只有一個候選且目前
-沒有有效憑證時，開機會自動切過去。只有裝過 eLeader 的電腦才會有這個預設位置；
-既有有效憑證路徑不會被覆蓋。
+永豐 Shioaji 開通測試精靈是本機桌面工具，依序引導使用者設定金鑰、模擬下單、
+驗證正式環境與體驗 Shioaji Pro。設定檔 `.env` 可由 Shioaji Pro 直接載入。
 
-## 畫面行為（v0.1.4）
+## 畫面行為
 
+- **美股複委託模擬測試**（Shioaji 1.8.0）：在 A 的「加測市場」勾選「美股複委託」。
+  這組 API Key 需要勾選複委託帳戶及交易權限。A6 檢查帳戶，A7 送出 AAPL 1 股、
+  180.25 美元的模擬限價買單，有收到接受回報才算通過。若補查後仍顯示「待確認」，
+  請先到模擬環境查閱委託紀錄。結果只驗證模擬委託。
 - **金鑰與憑證**：四欄（API Key、Secret Key、憑證密碼、憑證檔＋「瀏覽…」）。
   輸入框顏色＝儲存狀態（綠＝已存、黃＝缺；一開始打字就還原預設、清空又回
   綠／黃）。標籤前的圓圈＝最近一次 A／B 對該欄的驗證結果（✓ 通過／✗ 卡在
@@ -36,10 +29,11 @@ Shioaji Pro／`shioaji server` 相同、可直接沿用——**`.env` 實際位�
 - **瀏覽…**：Windows 原生檔案對話框，以 TopMost＋工作列可見的隱形 owner 視窗
   開啟（否則會壓在 app 後面、工作列沒項目）；PowerShell 輸出強制 UTF-8
   （中文路徑不會亂碼）。
-- **A／B 按鈕**各附用途說明；「也測期貨／選擇權」是整顆可按的切換鈕（按下變
-  綠打勾）。A 執行前檢查台灣時間（週一～五 08:00–20:00）與 18–20 點的台灣
-  IP。
-- **執行輸出**：子行程逐行輸出（即時遮罩金鑰值與身分證字號），末尾是
+- **A／B 按鈕**各附用途說明。A 的「加測市場」可勾選期貨／選擇權和美股複委託，
+  B 可各自加查期貨／選擇權和美股複委託帳戶的簽署狀態（B3／B7），只查詢、不下單。
+  A 執行前檢查台股與期貨的模擬時段
+  （週一至週五台灣時間 08:00–20:00，18:00 後限台灣 IP）。
+- **執行紀錄**：子行程逐行輸出（即時遮罩金鑰值與身分證字號），末尾是
   `═══` 框線的文字總覽；**檢核單**表格列每一項 ✓／✗／－ 與原因（每次按
   A／B 先清空再只列這次跑的項目），原因裡的永豐簽署頁網址可點（走
   `/api/open` 白名單、系統瀏覽器開）。
@@ -49,30 +43,22 @@ Shioaji Pro／`shioaji server` 相同、可直接沿用——**`.env` 實際位�
   離線診斷（憑證檔與密碼本身可讀、到期日；若憑證主體含身分證字號且與登入帳號
   不同人會明講，字號打碼）。非 Windows 或系統缺 PowerShell 時自動退回原本連線
   查詢的作法。
-- **匯出除錯紀錄**：在程式同層（`wizard.exe`／`.env` 所在的程式資料夾，不是
-  目前作用中帳號的憑證資料夾）產生 `shioaji_wizard-debug-<時間>.log`
+- **匯出除錯紀錄**：在程式工作資料夾產生 `shioaji_wizard-debug-<時間>.log`
   （版本、遮罩後 .env、檢核單、最近一次輸出、app.log／shioaji.log 尾段；金鑰
   值全文遮罩、身分證字號只留頭尾），並在檔案總管選取它。
 - **使用說明**是畫面內彈窗。
 - 殼：一律 `--disable-extensions --disable-sync`；關窗即收攤（job 執行中
   會先殺子行程；子行程另有 120 秒無輸出／10 分鐘總逾時）。
 
-## 多帳號（eLeader 憑證）
+## 設定檔與憑證
 
-- 偵測到的 eLeader 憑證（`C:\ekey\551\<身分證字號>\S\*.pfx`）常駐列成畫面上的
-  「帳號」清單（身分證字號打碼，標「使用中」／「已有設定」），可隨時點選切換；
-  切到已有 `.env` 的帳號會直接沿用其 API Key／Secret Key，沒有的話表單留空、
-  按「儲存設定」才建立。切換帳號會清空檢核單、金鑰視為未驗證。
-- `.env` 位置規則：選用 `C:\ekey\551\<身分證字號>\S\` 底下的憑證 → `.env`
-  存在那個資料夾（跟憑證放一起，每個身分證字號各自一份）；其他位置的憑證
-  （含程式同層的 `Sinopac.pfx`）→ `.env` 仍存程式同層，且**不會**在程式同層
-  另留副本。畫面上會顯示目前這份 `.env` 的完整位置（身分證字號打碼）；
-  Shioaji Pro／`shioaji server` 要沿用時請照畫面顯示的位置設定，不要假設一定
-  在程式資料夾。
-- 選到 ekey 憑證且該帳號尚未存過密碼時，憑證密碼欄會自動帶入身分證字號
-  （eLeader 預設密碼），仍要按「儲存設定」才生效。
-- 舊版升級：若程式同層 `.env` 的憑證路徑已指向 ekey 憑證，啟動時會自動把該
-  `.env` 複製到憑證資料夾並切換過去（程式同層原檔保留不刪）。
+- 每次啟動從「設定金鑰」開始。可用 Windows 原生對話框開啟既有 `.env`，
+  或選擇新檔案的資料夾。偵測到 eKey 時，預設使用券商憑證所在資料夾，
+  否則使用 `%USERPROFILE%\.shioaji-pro\.env`。
+- 「正式環境驗證」可用 Windows 原生對話框指定憑證檔。既有可攜版的設定檔可直接開啟。
+- 金鑰設定完成後，可在左側「忘記設定檔.env在哪嗎?」複製路徑。第一次完成模擬下單
+  驗證後，建議等待 30 分鐘讓系統建立 API 授權。正式環境驗證通過後，
+  第四步會帶你前往 Shioaji Pro。第一次登入時請用「載入設定檔（.env）」沿用同一份設定。
 
 ## 安全與免責聲明
 
@@ -107,52 +93,19 @@ uv run ty check src tools
 uv run --with pillow python tools/make_icon.py   # 重新產 static/favicon.ico（自製印章圖）
 ```
 
-`--root`（`sjenv.ROOT`）是程式本體所在的工作資料夾：預設放 `.env`／
-`Sinopac.pfx`；內部檔案 `app.log`／`shioaji.log`／`.app-ready`／`.app-status`
-放其下的隱藏子目錄 `.runtime`；見 `src/shioaji_wizard/sjenv.py`。切到 eLeader
-憑證帳號時 `.env` 實際落在憑證資料夾（`sjenv.PROFILE_DIR`，子行程用環境變數
-`SJ_PROFILE_DIR` 沿用），但 `ROOT`／`.runtime`／`Sinopac.pfx` 預設位置仍固定綁
-`--root`，不隨帳號切換。正式打包後的桌面 app 用 exe 所在資料夾當 `ROOT`。
-**QA 用的工作資料夾若放了真金鑰，用完要刪**（例如 `.qa/`，已 gitignore）。
+`--root` 是程式工作資料夾，用來放執行紀錄和最近選擇。測試子行程透過
+`SJ_PROFILE_DIR` 讀取目前選用的 `.env`。正式安裝版的工作資料夾位於安裝目錄的
+`data` 子目錄。QA 使用隔離工作資料夾與測試資料。
 
-## 打包（portable bundle）
+## Windows 安裝檔（NSIS）
 
-```bash
-uv run python tools/build_bundle.py [--zip] [--verify] [--allow-oversize]
+```powershell
+uv run python tools/build_bundle.py --verify --makensis <makensis.exe 的絕對路徑>
 ```
 
-移植自姊妹專案 fcn-pricing 的同名打包腳本（複製 uv 管理的 CPython 3.12.13
-standalone、套件依 `uv.lock` 同版 vendored、launcher 以 Windows 內建 `csc.exe`
-現編、`/codepage:65001`）；差異與設計取捨見 `tools/build_bundle.py` 模組頂部
-docstring。
-
-- `--zip`：另打一份 ASCII 檔名 zip（`dist/shioaji-wizard-v<版本>.zip`）。zip
-  一律從乾淨的 tmp bundle 打、且永遠排除根層 `.env`／`*.pfx`。
-- `--verify`：build 完成後在隔離 PATH 下起一次服務，確認首頁與 `/api/state`
-  正常、閒置逾時自動關閉、`.runtime` 為 hidden；verify 後清掉 `.runtime`。
-- 重建時會把舊 bundle 根層的 `.env`／`*.pfx` 搬回新 bundle（開發者實測用的
-  設定不會被吃掉）。
-- `--allow-oversize`：檔案數超過 `MAX_FILES`（5000）時仍產出（只警告）。
-
-輸出在 `dist/shioaji_wizard/`（bundle 目錄名固定不帶版本；版本號在 zip 檔名
-與 exe 版本資源）。
-
-### bundle 內容結構
-
-```text
-dist/shioaji_wizard/
-├── wizard.exe              # 雙擊即開啟（與除錯 .bat 一起是僅有的可見項目）
-├── python/                 # 內嵌 CPython 3.12.13 + vendored 套件（隱藏）
-├── 啟動（除錯）.bat          # 可見；視窗開不起來時雙擊它看即時錯誤
-├── README.txt              # 使用說明＋SmartScreen 解除封鎖教學（隱藏）
-├── .env                    # 使用者自己產生；API 金鑰等設定
-├── Sinopac.pfx              # 使用者自己放；永豐憑證檔
-├── .runtime/                # 程式跑起來後才出現（隱藏）
-└── shioaji_wizard-debug-*.log  # 使用者按「匯出除錯紀錄」才會出現
-```
-
-除 `wizard.exe`／`啟動（除錯）.bat`／`.env`／`*.pfx`／`*.log` 外，其餘項目在打包時與每次啟動時都
-會被 best-effort 設為隱藏（打包端 `hide_bundle_top_level`；啟動端
-`tools/launcher.cs` 的 `RehideTopLevel`）。zip 條目另把隱藏屬性寫進
-`external_attr`，Explorer「解壓縮全部」／7-Zip 會照著還原；`Expand-Archive`／
-`tar` 不會，那種情況第一次啟動 `wizard.exe` 後才會隱藏。啟動提示（splash）在瀏覽器視窗送出啟動後約 1.5 秒消失。
+- 預設產出單一 `dist/shioaji-wizard-setup.exe`。安裝在目前使用者的
+  `%LOCALAPPDATA%\ShioajiWizard`，從「開始」選單開啟。
+- 安裝程式內含 CPython、Shioaji SDK 及其他執行依賴。安裝檔排除金鑰、憑證與執行紀錄。
+- 升級與移除依照出貨清單清理程式檔。設定檔、憑證和工作資料可保留。
+- `--verify` 在隔離目錄測試安裝、啟動、本機 API、SDK 版本、重裝與解除安裝。
+- `--zip` 可另建開發驗收用的可攜壓縮檔。

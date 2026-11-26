@@ -9,10 +9,9 @@
 Chromium `--app` 殼，一頁式 GUI 做 A（模擬登入＋模擬下單測試）、B（正式環境
 憑證測試），逐項列出 ✓／✗／－ 與原因；`.env`（SJ_API_KEY／SJ_SEC_KEY／
 SJ_CA_PASSWD／SJ_CA_PATH）讓 Shioaji Pro／`shioaji server` 直接沿用——支援多
-帳號，`.env` 實際位置跟著選用的憑證走（程式同層 or eLeader 憑證資料夾），見
-「結構」`sjenv.py`／`server.py` 條目。打包成 portable 零依賴資料夾
-（`dist/shioaji_wizard/`：使用者只看到 `wizard.exe`、`.env`、`Sinopac.pfx`、
-匯出的 `.log`，其餘 hidden）。畫面行為細節見 `README.md`「畫面行為」。
+帳號。使用者選擇 `.env` 位置，建立時優先預設券商 eKey 憑證資料夾，否則
+使用 `%USERPROFILE%\.shioaji-pro`。NSIS 打包為單一 Windows 安裝檔
+（`dist/shioaji-wizard-setup.exe`）。畫面行為細節見 `README.md`「畫面行為」。
 
 ## 鐵則
 
@@ -61,8 +60,8 @@ SJ_CA_PASSWD／SJ_CA_PATH）讓 Shioaji Pro／`shioaji server` 直接沿用—�
   `.runtime/active-profile`（只採信 ROOT 或現存 eLeader 候選的父目錄）；
   `find_eleader_pfx()` 掃 `EKEY_BASE`（`C:\ekey\551`，QA 用 `SJ_EKEY_BASE`
   覆寫，不動真的 `C:\ekey`）。
-- `test_sim_order.py`（A1–A5）、`test_ca.py`（B1–B6；`--futures` 決定 B3；
-  B4／B6 用 `certinfo` 離線先做、不受登入／B5 影響，B5 失敗會附離線診斷
+- `test_sim_order.py`（A1–A7）、`test_ca.py`（B1–B7；`--futures` 決定 B3，
+  `--intl` 決定 B7；B4／B6 用 `certinfo` 離線先做、不受登入／B5 影響，B5 失敗會附離線診斷
   含身分證字號比對）— 也可獨立 `-m` 執行；都接管 shioaji 的委託回報
   callback。
 - `desktop.py`／`shell.py`／`chromium.py`／`status.py`／`guards.py`／
@@ -72,10 +71,10 @@ SJ_CA_PASSWD／SJ_CA_PATH）讓 Shioaji Pro／`shioaji server` 直接沿用—�
   `.app-ready` 在 `shell.launch` 後立刻寫）。
 - `static/index.html` — 單頁前端（含使用說明彈窗、標示語義、金鑰鎖定、
   帳號清單與切換）。
-- `tools/build_bundle.py`、`tools/launcher.cs`、`tools/make_icon.py` —
-  portable 打包（`uv run python tools/build_bundle.py --zip --verify`；zip 從
-  tmp bundle 打且排除 .env／pfx；重建保留舊 bundle 的 .env／pfx；verify 後清
-  `.runtime`；csc `/codepage:65001`）。
+- `tools/build_bundle.py`、`tools/launcher.cs`、`tools/installer.nsi` —
+  NSIS 打包（`uv run python tools/build_bundle.py --verify`）。在隔離目錄驗證
+  安裝、重裝與移除；`--zip` 另產開發用可攜壓縮檔。兩者均排除使用者
+  設定與憑證。C# launcher 用 csc `/codepage:65001`。
 
 ## 已知坑
 
@@ -98,7 +97,7 @@ SJ_CA_PASSWD／SJ_CA_PATH）讓 Shioaji Pro／`shioaji server` 直接沿用—�
   既有檔「讀不到」（OSError）一律上拋，**不可當空檔重建**；要切換／搬家時，目標檔
   快照在改任何狀態之前拍、`active-profile` 最後才提交。改 `.env` 存放規則必須同時
   給既有使用者遷移路徑（「空白欄位＝保留原值」換了檔就變成空值）。
-- 檢核單列數固定（A1–A5／B1–B6）：每一條早退路徑都要把沒跑到的項目補 SKIP，
+- 檢核單列數固定（A1–A7／B1–B7）：每一條早退路徑都要把沒跑到的項目補 SKIP，
   調整檢查順序後用「每項恰好記一次」的測試對帳（見 `tests/test_diagnostics.py`）。
 - PowerShell 呼叫 .NET 方法找不到相符多載時會默默把參數 `ToString()`：
   `X509Certificate2Collection.Import` 沒有 `SecureString` 多載，傳

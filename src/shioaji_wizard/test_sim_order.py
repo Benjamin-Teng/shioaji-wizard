@@ -5,7 +5,7 @@
 簽署時間必須早於測試時間；證券與期貨分開測、相隔 ≥ 1 秒。
 
 結束時列出每一項測試通過／未通過與原因。
-用法：由精靈／GUI 呼叫；或  uv run python -m shioaji_wizard.test_sim_order [--futures]
+用法：由精靈／GUI 呼叫；或  uv run python -m shioaji_wizard.test_sim_order [--futures] [--intl]
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import contextlib
 import sys
 import time
 import warnings
+from decimal import Decimal
 
 from shioaji_wizard.diagnostics import (
     explain_feature_error,
@@ -22,13 +23,16 @@ from shioaji_wizard.diagnostics import (
     missing_account_reason,
 )
 from shioaji_wizard.diagnostics import explain_login_error as _explain_login_error
-from shioaji_wizard.sjenv import ENV_PATH, Report, load_env, print_summary
+from shioaji_wizard.sjenv import ENV_PATH, UNKNOWN, Report, load_env, print_summary
 
 A_LOGIN = "A1 模擬環境登入"
 A_STOCK_ACC = "A2 證券帳戶"
 A_STOCK_ORDER = "A3 證券模擬下單"
 A_FUT_ACC = "A4 期貨帳戶"
 A_FUT_ORDER = "A5 期貨模擬下單"
+A_INTL_ACC = "A6 美股複委託帳戶"
+A_INTL_ORDER = "A7 美股複委託模擬下單"
+INTL_CHECK_BEFORE_RETRY = "請先到模擬環境查閱委託紀錄，再決定是否重跑"
 
 
 def explain_login_error(e: Exception) -> str:
@@ -73,12 +77,72 @@ def order_reason(trade, sj, *, product: str = "該商品") -> str:
     return f"狀態 {status}{detail}；{reason}"
 
 
-def _skip_after_login_failure(rep: Report, *, want_futures: bool, reason: str) -> None:
-    """A1 沒過時 A2–A5 一律補 SKIP：檢核單固定五列，不能因為早退就少列。"""
+def _skip_after_login_failure(rep: Report, *, want_futures: bool, want_intl: bool, reason: str) -> None:
+    """A1 沒過時仍補齊 A2–A7。"""
     for n in (A_STOCK_ACC, A_STOCK_ORDER):
         rep.skip(n, reason)
     for n in (A_FUT_ACC, A_FUT_ORDER):
         rep.skip(n, reason if want_futures else "未要求測期貨")
+    for n in (A_INTL_ACC, A_INTL_ORDER):
+        rep.skip(n, reason if want_intl else "未選擇美股複委託測試")
+
+
+def _test_intl_order(rep: Report, api, sj, accounts) -> None:
+    account = next((a for a in accounts if a.account_type == sj.AccountType.Intl), None)
+    if account is None:
+        rep.fail(A_INTL_ACC, missing_account_reason("美股複委託"))
+        rep.skip(A_INTL_ORDER, "沒有可用的美股複委託帳戶")
+        return
+    rep.ok(A_INTL_ACC, "找到可用的美股複委託帳戶")
+    try:
+        # 原生 SDK 的小寫 contracts 是 v2 ContractsApi，1.8.0 的 .pyi 仍將它標為舊版 Contracts。
+        contract = api.contracts.get("AAPL", region="US")
+        if contract is None:
+            rep.fail(A_INTL_ORDER, "找不到美股測試合約 AAPL，請確認 API Key 的行情／資料權限")
+            return
+        price = Decimal("180.25")
+        order = sj.StockOrder(
+            action="Buy", price=price, quantity=1, price_type="LMT", time_in_force="DAY", account=account
+        )
+        try:
+            trade = api.place_order(contract, order)
+        except (sj.OrderOutcomeUnknownError, TimeoutError):
+            # SDK 未交回 Trade，缺少委託識別資料，不能用相同商品及價格推定是哪一筆。
+            rep.add(A_INTL_ORDER, UNKNOWN, f"送單未收到確認，無法判定委託是否接受；{INTL_CHECK_BEFORE_RETRY}")
+            return
+        # SDK 先將主動回報反映到同一筆 Trade。等待回報期間只讀狀態，不重送委託。
+        deadline = time.monotonic() + 8
+        pending = (sj.OrderStatus.PendingSubmit, sj.OrderStatus.PreSubmitted)
+        while trade.status.status in pending and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if trade.status.status in pending:
+            # 漏回報時只補查這一筆，保留原委託，不重送。
+            with contextlib.suppress(Exception):
+                api.update_status(trade=trade, timeout=5000)
+        result = trade.status
+        if result.status in pending:
+            rep.add(
+                A_INTL_ORDER,
+                UNKNOWN,
+                f"未收到確認回報，補查後仍無法判定；{INTL_CHECK_BEFORE_RETRY}",
+            )
+        elif result.status in (sj.OrderStatus.Submitted, sj.OrderStatus.PartFilled, sj.OrderStatus.Filled):
+            rep.ok(A_INTL_ORDER, f"AAPL 1 股，限價 {price} 美元，已收到接受回報")
+        else:
+            message = result.msg or str(result.status)
+            rep.fail(A_INTL_ORDER, _intl_order_error(message))
+    except Exception as e:  # noqa: BLE001
+        rep.fail(A_INTL_ORDER, _intl_order_error(e))
+
+
+def _intl_order_error(error: Exception | str) -> str:
+    diagnostic = explain_feature_error(error, feature="交易") if isinstance(error, Exception) else ""
+    if is_ip_allowlist_error(str(error)):
+        return explain_order_error(error, product="複委託")
+    return (
+        diagnostic
+        or f"無法確認美股模擬委託通過（{str(error)[:160]}）；請到 API 管理頁確認交易與複委託帳戶設定"
+    )
 
 
 def main() -> int:
@@ -88,9 +152,12 @@ def main() -> int:
     rep = Report()
     env = load_env()
     want_futures = "--futures" in sys.argv
+    want_intl = "--intl" in sys.argv
     if not (env.get("SJ_API_KEY") and env.get("SJ_SEC_KEY")):
         rep.fail(A_LOGIN, f"{ENV_PATH} 缺少 SJ_API_KEY / SJ_SEC_KEY")
-        _skip_after_login_failure(rep, want_futures=want_futures, reason="前置（登入）未通過")
+        _skip_after_login_failure(
+            rep, want_futures=want_futures, want_intl=want_intl, reason="前置（登入）未通過"
+        )
         print_summary(rep.items, "A 模擬測試結果")
         return 2
 
@@ -101,7 +168,7 @@ def main() -> int:
             A_LOGIN,
             f"shioaji 模組載入失敗（{type(e).__name__}: {str(e)[:120]}）；Windows 可能缺 Visual C++ 可轉散發套件，或環境損毀請刪除 .venv 重跑",
         )
-        _skip_after_login_failure(rep, want_futures=want_futures, reason="前置未通過")
+        _skip_after_login_failure(rep, want_futures=want_futures, want_intl=want_intl, reason="前置未通過")
         print_summary(rep.items, "A 模擬測試結果")
         return 2
 
@@ -109,7 +176,7 @@ def main() -> int:
         api = sj.Shioaji(simulation=True)  # 模擬模式：這是硬性保險，不要改成 False
     except Exception as e:  # noqa: BLE001
         rep.fail(A_LOGIN, f"shioaji 初始化失敗（{type(e).__name__}: {str(e)[:120]}）")
-        _skip_after_login_failure(rep, want_futures=want_futures, reason="前置未通過")
+        _skip_after_login_failure(rep, want_futures=want_futures, want_intl=want_intl, reason="前置未通過")
         print_summary(rep.items, "A 模擬測試結果")
         return 2
     # shioaji 預設的委託回報 callback 會把整個 OrderState dict 印到輸出（對使用者是雜訊），接管掉
@@ -122,7 +189,9 @@ def main() -> int:
             logged_in = True
         except Exception as e:  # noqa: BLE001
             rep.fail(A_LOGIN, explain_login_error(e))
-            _skip_after_login_failure(rep, want_futures=want_futures, reason="前置（登入）未通過")
+            _skip_after_login_failure(
+                rep, want_futures=want_futures, want_intl=want_intl, reason="前置（登入）未通過"
+            )
             return 1
         rep.ok(A_LOGIN, f"{len(accounts)} 個帳戶")
         for acc in accounts:
@@ -213,8 +282,13 @@ def main() -> int:
                             explain_order_error(e, product="期貨"),
                         )
         else:
-            rep.skip(A_FUT_ACC, "未要求測期貨（只做證券可忽略；要測請按「也測期貨／選擇權」）")
+            rep.skip(A_FUT_ACC, "未選擇期貨測試（可在「加測市場」勾選期貨／選擇權）")
             rep.skip(A_FUT_ORDER, "未要求測期貨")
+        if want_intl:
+            _test_intl_order(rep, api, sj, accounts)
+        else:
+            rep.skip(A_INTL_ACC, "未選擇美股複委託測試")
+            rep.skip(A_INTL_ORDER, "未選擇美股複委託測試")
         return 0 if rep.all_passed else 1
     finally:
         if logged_in:
