@@ -44,7 +44,7 @@ def stage_python(runtime: Path, temp: Path) -> None:
     run("uv", "sync", "--locked", "--no-dev", "--no-editable", "--python", python, env=env)
     libraries = Path(run(venv / "bin/python", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"))
     base_libraries = Path(run(python, "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"))
-    ignored = shutil.ignore_patterns("__pycache__", "*.pyc", ".env", ".env.*", "*.pfx", "*.p12")
+    ignored = shutil.ignore_patterns("__pycache__", "*.pyc", "*.[eE][nN][vV]", ".env.*", "*.pfx", "*.p12")
     shutil.copytree(prefix, runtime, symlinks=True, ignore=ignored)
     shutil.copytree(
         libraries, runtime / base_libraries.relative_to(prefix), dirs_exist_ok=True, ignore=ignored
@@ -99,7 +99,7 @@ def verify_app(app: Path, version: str, temp: Path) -> None:
     installed = temp / "Installed applications" / app.name
     installed.parent.mkdir()
     run("/usr/bin/ditto", app, installed)
-    for pattern in (".env", ".env.*", "*.pfx", "*.p12"):
+    for pattern in ("*.[eE][nN][vV]", ".env.*", "*.pfx", "*.p12"):
         if next(installed.rglob(pattern), None) is not None:
             raise RuntimeError("安裝檔混入使用者設定")
 

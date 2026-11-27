@@ -29,7 +29,8 @@ class TestNsisInstaller:
         assert bb.INSTALLER_EXE_NAME == "shioaji-wizard-setup.exe"
 
     @pytest.mark.parametrize(
-        "name", [".env", ".ENV.backup", "certificate.PFX", "identity.p12", "private.key", "app.log"]
+        "name",
+        [".env", "台股A1.ENV", ".ENV.backup", "certificate.PFX", "identity.p12", "private.key", "app.log"],
     )
     def test_rejects_sensitive_payload_at_any_depth(self, tmp_path, name):
         bundle = tmp_path / "payload"

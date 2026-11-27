@@ -5,7 +5,7 @@
 多帳號：.env 實際落在「目前 profile 目錄」（PROFILE_DIR），預設就是 ROOT（單一
 帳號／舊行為）；server.py 支援切換到 eLeader 憑證資料夾（``C:\\ekey\\551\\<身分證
 字號>\\S``）時，會把 SJ_PROFILE_DIR 設給跑 test_ca／test_sim_order 的子行程，
-這兩支腳本因此不用改，直接沿用 ENV_PATH。顯式選擇的設定檔可由 SJ_CA_DEFAULT
+另用 SJ_PROFILE_FILENAME 傳入檔名，兩支腳本直接沿用 ENV_PATH。顯式選擇的設定檔可由 SJ_CA_DEFAULT
 另行指定預設憑證及相對路徑的基準；內部 ``.runtime`` 始終留在 app ROOT。
 """
 
@@ -23,7 +23,7 @@ ROOT = Path(os.environ.get("SJ_ENV_DIR") or Path.cwd()).resolve()
 # 目前 profile 目錄（.env 實際所在）：子行程由 SJ_PROFILE_DIR 指定；沒設就是 ROOT。
 # 伺服器行程本身的「目前 profile」是可變狀態，由 server.py 自行維護，不讀這個常數。
 PROFILE_DIR = Path(os.environ.get("SJ_PROFILE_DIR") or ROOT).resolve()
-ENV_PATH = PROFILE_DIR / ".env"
+ENV_PATH = PROFILE_DIR / (os.environ.get("SJ_PROFILE_FILENAME") or ".env")
 DEFAULT_PFX = Path(os.environ["SJ_CA_DEFAULT"]) if os.environ.get("SJ_CA_DEFAULT") else ROOT / "Sinopac.pfx"
 # 內部檔案（app.log、shioaji.log、.app-ready、.app-status）全放這個隱藏子資料夾，
 # 使用者看到的根層只有 wizard.exe／.env／Sinopac.pfx／匯出的 .log。

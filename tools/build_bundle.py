@@ -575,7 +575,7 @@ def write_nsis_uninstall_manifest(bundle: Path, manifest: Path) -> None:
     for entry in entries:
         name = entry.name.casefold()
         if (
-            name == ".env"
+            name.endswith(".env")
             or name.startswith(".env.")
             or name == ".runtime"
             or entry.suffix.casefold() in {".pfx", ".p12", ".key", ".ppk", ".log"}
@@ -653,11 +653,11 @@ def finalize(tmp_bundle: Path, final: Path, *, make_zip: bool, version: str = ""
         print(f"警告：舊 bundle 未能完全清除（{old}），可手動刪除")
 
 
-USER_FILE_PATTERNS = (".env", "*.pfx")
+USER_FILE_PATTERNS = ("*.[eE][nN][vV]", "*.pfx")
 
 
 def _is_user_file(name: str) -> bool:
-    return name == ".env" or name.lower().endswith(".pfx")
+    return name.lower().endswith((".env", ".pfx"))
 
 
 def _dos_attributes(path: Path) -> int:
@@ -854,7 +854,7 @@ def verify_installer(installer: Path, version: str, test_dir: Path, log_path: Pa
     data_dir.mkdir()
     if not (app_dir / INSTALLER_MARKER).is_file() or not (app_dir / LAUNCHER_EXE_NAME).is_file():
         raise BuildError("NSIS 安裝驗證：缺少安裝識別或啟動器")
-    if list(app_dir.rglob(".env")) or list(app_dir.rglob("*.pfx")):
+    if any(_is_user_file(path.name) for path in app_dir.rglob("*") if path.is_file()):
         raise BuildError("NSIS 安裝驗證：安裝內容不應含使用者設定或憑證")
     verify_bundle(app_dir, root=data_dir, log_path=log_path)
     sdk_version = run_step(

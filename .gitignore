@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
 dist/
-.env
+*.[eE][nN][vV]
 *.pfx
 shioaji.log
 .ruff_cache/

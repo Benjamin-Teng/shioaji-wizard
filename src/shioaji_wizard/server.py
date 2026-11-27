@@ -59,7 +59,7 @@ except Exception:  # noqa: BLE001 — 開發模式沒裝 wheel 時
     APP_VERSION = "dev"
 
 STATIC = Path(__file__).resolve().parent / "static"
-KNOWN_KEYS = REQUIRED_KEYS + OPTIONAL_KEYS
+KNOWN_KEYS = (*REQUIRED_KEYS, *OPTIONAL_KEYS, "NAME")
 E_FORMAT = "E1 .env 格式／必填金鑰"
 E_CA_PWD = "E2 憑證密碼已填（SJ_CA_PASSWD）"  # noqa: S105 — 是測試項目名稱，不是密碼
 E_PFX = "E3 憑證檔存在（SJ_CA_PATH）"
@@ -170,38 +170,45 @@ def profile_dir_for(pfx: str) -> Path:
 _ACTIVE_PROFILE_FILE = RUNTIME / "active-profile"
 
 
-def _read_active_profile() -> tuple[Path, bool]:
+def _is_env_filename(name: str) -> bool:
+    return Path(name).name == name and name.lower().endswith(".env")
+
+
+def _read_active_profile() -> tuple[Path, bool, str]:
     """讀取目前 profile。舊純文字格式仍限 ROOT 或 eLeader，顯式選取改用 JSON。"""
     if not _ACTIVE_PROFILE_FILE.is_file():
-        return ROOT, False
+        return ROOT, False, ".env"
     try:
         text = _ACTIVE_PROFILE_FILE.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
-        return ROOT, False
+        return ROOT, False, ".env"
     if not text:
-        return ROOT, False
+        return ROOT, False, ".env"
     if text.startswith("{"):
         try:
             data = json.loads(text)
         except ValueError:
-            return ROOT, False
+            return ROOT, False, ".env"
         if isinstance(data, dict) and isinstance(data.get("selected_dir"), str):
             selected = Path(data["selected_dir"])
-            if selected.is_absolute():
-                return selected, True
-        return ROOT, False
+            filename = data.get("selected_filename", ".env")
+            if selected.is_absolute() and isinstance(filename, str) and _is_env_filename(filename):
+                return selected, True, filename
+        return ROOT, False, ".env"
     candidate_dir = Path(text)
     if candidate_dir == ROOT:
-        return ROOT, False
+        return ROOT, False, ".env"
     valid_dirs = {Path(c).parent for c in find_eleader_pfx()}
-    return (candidate_dir if candidate_dir in valid_dirs else ROOT), False
+    return (candidate_dir if candidate_dir in valid_dirs else ROOT), False, ".env"
 
 
-def _persist_active_profile(path: Path, *, selected: bool = False) -> None:
+def _persist_active_profile(path: Path, *, selected: bool = False, filename: str = ".env") -> None:
     """寫不進去就往上拋（OSError）：記不住的切換下次啟動會默默回到 ROOT，等於用錯帳號，
     所以呼叫端一律「先持久化、成功才改記憶體狀態」。"""
     _write_active_profile_text(
-        json.dumps({"selected_dir": str(path)}, ensure_ascii=False) if selected else str(path)
+        json.dumps({"selected_dir": str(path), "selected_filename": filename}, ensure_ascii=False)
+        if selected
+        else str(path)
     )
 
 
@@ -210,11 +217,11 @@ def _write_active_profile_text(text: str) -> None:
     atomic_write_text(_ACTIVE_PROFILE_FILE, text)
 
 
-_profile_dir, _setup_selected = _read_active_profile()
+_profile_dir, _setup_selected, _profile_filename = _read_active_profile()
 
 
 def env_path() -> Path:
-    return _profile_dir / ".env"
+    return _profile_dir / _profile_filename
 
 
 def _profile_default_pfx() -> Path:
@@ -239,18 +246,25 @@ def _setup_default(candidates: list[str]) -> tuple[Path | None, str]:
     return _setup_home() / ".shioaji-pro", "home"
 
 
-type _ProfileSnapshot = tuple[Path, bool, dict[str, dict[str, str]], set[str], set[str]]
+type _ProfileSnapshot = tuple[Path, bool, str, dict[str, dict[str, str]], set[str], set[str]]
 
 
 def _snapshot_profile_state() -> _ProfileSnapshot:
-    return _profile_dir, _setup_selected, dict(SESSION), set(_STALE_FIELDS), set(_PASSED_STEPS)
+    return (
+        _profile_dir,
+        _setup_selected,
+        _profile_filename,
+        dict(SESSION),
+        set(_STALE_FIELDS),
+        set(_PASSED_STEPS),
+    )
 
 
 def _restore_profile_state(snapshot: _ProfileSnapshot) -> None:
     """切換失敗時退回切換前。active-profile 一律「最後才提交」，失敗路徑上磁碟紀錄
     從沒被動過，所以這裡只需要還原記憶體——不存在「回滾持久化又失敗」的雙重故障。"""
-    global _profile_dir, _setup_selected
-    _profile_dir, _setup_selected, prev_session, prev_stale, prev_passed = snapshot
+    global _profile_dir, _setup_selected, _profile_filename
+    _profile_dir, _setup_selected, _profile_filename, prev_session, prev_stale, prev_passed = snapshot
     SESSION.clear()
     SESSION.update(prev_session)
     _STALE_FIELDS.clear()
@@ -259,13 +273,14 @@ def _restore_profile_state(snapshot: _ProfileSnapshot) -> None:
     _PASSED_STEPS.update(prev_passed)
 
 
-def _enter_profile_dir(target_dir: Path, *, selected: bool = False) -> None:
+def _enter_profile_dir(target_dir: Path, *, selected: bool = False, filename: str = ".env") -> None:
     """只改記憶體狀態：換 profile、清空檢核單、四欄標為未知（新帳號一律視為未驗證，
     金鑰不沿用鎖定狀態）。呼叫端做完該做的 .env 寫入後，必須再呼叫
     ``_persist_active_profile`` 提交；任何一步 OSError 就 ``_restore_profile_state``。"""
-    global _profile_dir, _setup_selected
+    global _profile_dir, _setup_selected, _profile_filename
     _profile_dir = target_dir
     _setup_selected = selected
+    _profile_filename = filename
     SESSION.clear()
     _PASSED_STEPS.clear()
     _STALE_FIELDS.clear()
@@ -623,7 +638,8 @@ def window_check() -> dict[str, Any]:
 def _run_job(job: Job, module: str, args: list[str]) -> None:
     env = dict(os.environ)
     env["SJ_ENV_DIR"] = str(ROOT)
-    env["SJ_PROFILE_DIR"] = str(_profile_dir)  # 子行程（test_ca／test_sim_order）沿用目前 profile 的 .env
+    env["SJ_PROFILE_DIR"] = str(_profile_dir)
+    env["SJ_PROFILE_FILENAME"] = _profile_filename
     env["SJ_CA_DEFAULT"] = str(_profile_default_pfx())
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -849,7 +865,7 @@ def api_env(body: EnvIn) -> dict[str, Any]:
             == _normalize_path(str(pfx_path({"SJ_CA_PATH": cap})))
         )
         # 目標檔快照要在動任何狀態之前拍：這一步讀取失敗就是什麼都還沒變
-        target_env = target_dir / ".env"
+        target_env = env_path() if target_dir == original_profile else target_dir / ".env"
         try:
             target_before = target_env.read_bytes() if target_env.is_file() else None
         except OSError as e:
@@ -962,19 +978,21 @@ def api_setup_source(body: SetupSourceIn) -> dict[str, Any]:
     with _lock:
         if _job and _job.running:
             raise HTTPException(409, "測試進行中，請等它結束再切換設定檔")
-        previous = _profile_dir, _setup_selected
+        previous = env_path(), _setup_selected
         candidates = find_eleader_pfx() if body.mode == "default" else []
         target_dir, _ = _setup_default(candidates) if body.mode == "default" else (None, "")
 
+    filename = ".env"
     if target_dir is None:
-        start = EKEY_BASE if body.mode == "default" else _profile_dir
+        start = EKEY_BASE if body.mode == "default" else previous[0].parent
         selected = _pick_setup_path("settings" if body.mode == "existing" else "directory", start)
         if selected is None:
             return {"ok": True, "cancelled": True}
         if body.mode == "existing":
-            if selected.name.lower() != ".env" or not selected.is_file():
+            if not _is_env_filename(selected.name) or not selected.is_file():
                 raise HTTPException(400, "請選擇現有的 .env 檔案")
             target_dir = selected.parent
+            filename = selected.name
         else:
             if not selected.is_dir():
                 raise HTTPException(400, "請選擇現有的資料夾")
@@ -988,17 +1006,18 @@ def api_setup_source(body: SetupSourceIn) -> dict[str, Any]:
         target_dir = target_dir.resolve()
     except OSError as e:
         raise HTTPException(400, "無法使用這個設定檔位置") from e
-    if (target_dir / ".env").is_dir():
+    target_env = target_dir / filename
+    if target_env.is_dir():
         raise HTTPException(400, "選擇的資料夾有同名子資料夾 .env，無法用於設定檔")
     with _lock:
-        if (_job and _job.running) or previous != (_profile_dir, _setup_selected):
+        if (_job and _job.running) or previous != (env_path(), _setup_selected):
             raise HTTPException(409, "目前設定已變更，請重新選擇設定檔")
-        if target_dir != _profile_dir or not _setup_selected:
+        if target_env != env_path() or not _setup_selected:
             try:
-                _persist_active_profile(target_dir, selected=True)
+                _persist_active_profile(target_dir, selected=True, filename=filename)
             except OSError as e:
                 raise HTTPException(500, "無法保存目前選擇的設定檔位置") from e
-            _enter_profile_dir(target_dir, selected=True)
+            _enter_profile_dir(target_dir, selected=True, filename=filename)
         return {"ok": True, "env_path": str(env_path())}
 
 

@@ -49,7 +49,7 @@ FunctionEnd
 
 Section
   SetOutPath "$INSTDIR\${APP_DIR}"
-  File /a /r /x ".env" /x ".env.*" /x "*.pfx" /x "*.p12" /x "*.key" /x "*.ppk" /x "*.log" /x ".runtime" "${PAYLOAD}\*"
+  File /a /r /x "*.env" /x ".env.*" /x "*.pfx" /x "*.p12" /x "*.key" /x "*.ppk" /x "*.log" /x ".runtime" "${PAYLOAD}\*"
   File "${INSTALLER_MARKER}"
 
   ; 先放好新版本，再用上一版的出貨清單移除舊程式。連碰到未知檔案時也不遞迴刪除。

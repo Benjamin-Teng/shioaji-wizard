@@ -169,6 +169,51 @@ def test_explicit_new_env_stays_selected_when_changing_certificate(
     assert not (tmp_path / ".env").exists()
 
 
+def test_named_env_selection_save_and_restart(client, env_mods, tmp_path: Path, monkeypatch):
+    _, server = env_mods
+    standard = tmp_path / ".env"
+    standard.write_text("NAME=另一組\n", encoding="utf-8")
+    original_standard = standard.read_bytes()
+    named = tmp_path / "台股A1.ENV"
+    name_line = "NAME=台股A1"
+    original_named = f"{name_line}\r\nSJ_API_KEY={FAKE_KEY}\r\nSJ_SEC_KEY={FAKE_SEC}\r\n".encode("utf-8-sig")
+    named.write_bytes(original_named)
+    choices = iter((standard, named))
+    monkeypatch.setattr(server, "_pick_setup_path", lambda mode, start: next(choices))
+    assert client.post("/api/setup-source", json={"mode": "existing"}).status_code == 200
+
+    response = client.post("/api/setup-source", json={"mode": "existing"})
+    assert response.status_code == 200, response.text
+    assert response.json()["env_path"] == str(named)
+    state = client.get("/api/state").json()
+    assert state["env"]["ok_a"]
+    assert state["env"]["problems"] == []
+    assert FAKE_KEY not in str(state) and FAKE_SEC not in str(state)
+    assert named.read_bytes() == original_named
+
+    (tmp_path / "憑證.pfx").touch()
+    saved = client.post("/api/env", json={"ca_path": "憑證.pfx", "ca_passwd": "fixture-password"})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["env"]["ok_b"]
+    assert name_line in named.read_text(encoding="utf-8-sig").splitlines()
+    assert standard.read_bytes() == original_standard
+
+    _, restarted = _reload_modules(monkeypatch, tmp_path)
+    assert restarted.env_path() == named
+
+    def fake_popen(cmd, **kwargs):
+        monkeypatch.setenv("SJ_PROFILE_DIR", kwargs["env"]["SJ_PROFILE_DIR"])
+        monkeypatch.setenv("SJ_PROFILE_FILENAME", kwargs["env"]["SJ_PROFILE_FILENAME"])
+        raise OSError("測試用：不要真的啟動子行程")
+
+    with monkeypatch.context() as job_patch:
+        job_patch.setattr(restarted.subprocess, "Popen", fake_popen)
+        restarted._run_job(restarted.Job("a"), "shioaji_wizard.test_sim_order", [])
+    child_env, _ = _reload_modules(monkeypatch, tmp_path)
+    assert child_env.ENV_PATH == named
+    assert child_env.load_env()["SJ_API_KEY"] == FAKE_KEY
+
+
 def test_cancelled_explicit_env_choice_does_not_change_profile(client, env_mods, monkeypatch):
     _, server = env_mods
     original = server.env_path()
