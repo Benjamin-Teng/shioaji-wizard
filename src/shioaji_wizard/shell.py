@@ -94,10 +94,7 @@ def launch(
         "--disable-extensions",
         "--disable-sync",
     ]
-    if sys.platform == "win32":
-        # 由 Windows 按螢幕工作區與縮放設定最大化，保留標題列與工作列。
-        cmd.append("--start-maximized")
-    elif window_size is not None:
+    if window_size is not None:
         # 殼每次都用全新暫時 profile（見上），Chromium 自己記不住視窗大小，
         # 沒設定就不塞，交給 Chromium 預設——不要自作主張決定一個尺寸。
         cmd.append(f"--window-size={window_size[0]},{window_size[1]}")
@@ -403,57 +400,23 @@ def _user32() -> Any:
     u.GetWindowThreadProcessId.restype = wintypes.DWORD
     u.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
     u.GetClassNameW.restype = ctypes.c_int
-    u.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
-    u.GetWindowTextLengthW.restype = ctypes.c_int
-    u.ShowWindowAsync.argtypes = (wintypes.HWND, ctypes.c_int)
-    u.ShowWindowAsync.restype = wintypes.BOOL
+    u.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+    u.GetWindowRect.restype = wintypes.BOOL
+    u.IsZoomed.argtypes = (wintypes.HWND,)
+    u.IsZoomed.restype = wintypes.BOOL
     return u
-
-
-def _find_main_hwnd(pid: int, *, timeout: float = 5.0, poll: float = 0.25) -> int | None:
-    """找 ``pid`` 的可見頂層 Chromium 視窗（class＝``Chrome_WidgetWin_1``、
-    有標題）；視窗尚未建立時輪詢至 ``timeout``。"""
-    u = _user32()
-    deadline = time.monotonic() + timeout
-    while True:
-        found: list[int] = []
-
-        # ``found`` 綁成預設引數（早繫結）：本迴圈每輪重建 ``found`` 並在同一輪
-        # 內同步呼叫 ``EnumWindows``（不跨輪存活），故遲繫結本無實際風險，但
-        # 顯式綁定同時滿足 ruff B023 且更明確。
-        @_WNDENUMPROC
-        def _cb(hwnd: int, _lparam: int, _found: list[int] = found) -> bool:
-            if not u.IsWindowVisible(hwnd):
-                return True
-            owner = wintypes.DWORD()
-            u.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-            if owner.value != pid:
-                return True
-            buf = ctypes.create_unicode_buffer(64)
-            u.GetClassNameW(hwnd, buf, 64)
-            if buf.value != _CHROMIUM_WINDOW_CLASS:
-                return True
-            if u.GetWindowTextLengthW(hwnd) <= 0:
-                return True
-            _found.append(int(hwnd))
-            return False  # 找到即停止列舉
-
-        u.EnumWindows(_cb, 0)
-        if found:
-            return found[0]
-        if time.monotonic() >= deadline:
-            return None
-        time.sleep(poll)
 
 
 _SWP_NOMOVE = 0x0002
 _SWP_NOZORDER = 0x0004
 _SWP_NOACTIVATE = 0x0010
+_PER_MONITOR_AWARE_V2 = -4
+_MONITOR_DEFAULTTONEAREST = 2
 
 
-def _set_window_pos(hwnd: int, width: int, height: int) -> None:
-    """只改大小，不動位置／Z 序／焦點。失敗 raise ``OSError``。"""
-    u = ctypes.WinDLL("user32", use_last_error=True)
+def _set_window_pos(hwnd: int, width: int, height: int, *, origin: tuple[int, int] | None = None) -> None:
+    """調整大小及指定的位置，保留 Z 序與焦點。"""
+    u = _user32()
     u.SetWindowPos.argtypes = (
         wintypes.HWND,
         wintypes.HWND,
@@ -467,24 +430,65 @@ def _set_window_pos(hwnd: int, width: int, height: int) -> None:
     ok = u.SetWindowPos(
         wintypes.HWND(hwnd),
         None,
-        0,
-        0,
+        *(origin or (0, 0)),
         width,
         height,
-        _SWP_NOMOVE | _SWP_NOZORDER | _SWP_NOACTIVATE,
+        (_SWP_NOMOVE if origin is None else 0) | _SWP_NOZORDER | _SWP_NOACTIVATE,
     )
     if not ok:
         raise OSError(f"SetWindowPos 失敗（GetLastError={ctypes.get_last_error()}）")
+
+
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [
+        ("size", wintypes.DWORD),
+        ("monitor", wintypes.RECT),
+        ("work_area", wintypes.RECT),
+        ("flags", wintypes.DWORD),
+    ]
+
+
+def _fit_window_to_work_area(hwnd: int) -> None:
+    """將超出螢幕工作區的啟動視窗縮進畫面，保留使用者手動最大化的狀態。"""
+    u = _user32()
+    set_thread_dpi = getattr(u, "SetThreadDpiAwarenessContext", None)
+    if set_thread_dpi is None:
+        return
+    set_thread_dpi.argtypes = (wintypes.HANDLE,)
+    set_thread_dpi.restype = wintypes.HANDLE
+    u.MonitorFromWindow.argtypes = (wintypes.HWND, wintypes.DWORD)
+    u.MonitorFromWindow.restype = wintypes.HANDLE
+    u.GetMonitorInfoW.argtypes = (wintypes.HANDLE, ctypes.POINTER(_MonitorInfo))
+    u.GetMonitorInfoW.restype = wintypes.BOOL
+    # 使用同一 DPI 座標空間讀取視窗、工作區及設定新位置。
+    previous_dpi = set_thread_dpi(_PER_MONITOR_AWARE_V2)
+    if not previous_dpi:
+        return
+    try:
+        bounds = wintypes.RECT()
+        info = _MonitorInfo(size=ctypes.sizeof(_MonitorInfo))
+        monitor = u.MonitorFromWindow(hwnd, _MONITOR_DEFAULTTONEAREST)
+        if u.IsZoomed(hwnd) or not u.GetWindowRect(hwnd, ctypes.byref(bounds)):
+            return
+        if not u.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return
+        work = info.work_area
+        width = min(bounds.right - bounds.left, work.right - work.left)
+        height = min(bounds.bottom - bounds.top, work.bottom - work.top)
+        x = min(max(bounds.left, work.left), work.right - width)
+        y = min(max(bounds.top, work.top), work.bottom - height)
+        if (x, y, x + width, y + height) != (bounds.left, bounds.top, bounds.right, bounds.bottom):
+            _set_window_pos(hwnd, width, height, origin=(x, y))
+    finally:
+        set_thread_dpi(previous_dpi)
 
 
 _MIN_REAL_WINDOW = (300, 200)
 """真實應用視窗的最小合理尺寸。
 
 Chromium 會另外建立一批 class 同為 ``Chrome_WidgetWin_1``、**有標題也可見**
-的小視窗（實測 158×26）給工作列縮圖／Aero Peek 用。``_find_main_hwnd`` 取
-EnumWindows 的第一筆，很容易就撈到那種代理視窗——對 ``brand_window`` 只是
-屬性設錯地方（無害），對「改大小」卻會**回報成功但畫面毫無變化**。故改大小
-另用一支更嚴格的找法。
+的小視窗（實測 158×26）給工作列縮圖／Aero Peek 用。改大小與設定工作列身份
+都要排除這些代理視窗。
 """
 
 
@@ -494,13 +498,11 @@ def _find_app_hwnd(pid: int, *, timeout: float = 2.0, poll: float = 0.25) -> int
     取最大而非第一個：代理視窗恆為極小尺寸，真視窗至少數百像素見方。
     """
     u = _user32()
-    u.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
-    u.GetWindowRect.restype = wintypes.BOOL
     deadline = time.monotonic() + timeout
     while True:
         found: list[tuple[int, int]] = []  # (面積, hwnd)
 
-        # ``found`` 綁成預設引數（早繫結，理由同 _find_main_hwnd）。
+        # 每輪建立各自的結果清單，並在同一輪列舉時使用。
         @_WNDENUMPROC
         def _cb(hwnd: int, _lparam: int, _found: list[tuple[int, int]] = found) -> bool:
             if not u.IsWindowVisible(hwnd):
@@ -592,8 +594,8 @@ def brand_window(
     pid: int,
     *,
     timeout: float = 5.0,
-    maximize: bool = False,
-    find_hwnd: Callable[..., int | None] = _find_main_hwnd,
+    fit_to_screen: bool = False,
+    find_hwnd: Callable[..., int | None] = _find_app_hwnd,
     set_props: Callable[[int, dict[int, str]], None] = _set_window_properties,
 ) -> bool:
     """把殼視窗掛上獨立工作列身份（AUMID＋Relaunch icon／顯示名稱）。
@@ -605,9 +607,11 @@ def brand_window(
     hwnd = find_hwnd(pid, timeout=timeout)
     if hwnd is None:
         return False
-    if maximize:
-        # 某些 Edge 組態會忽略 --app 搭配的 --start-maximized。
-        _user32().ShowWindowAsync(hwnd, 3)  # SW_MAXIMIZE
+    if fit_to_screen:
+        try:
+            _fit_window_to_work_area(hwnd)
+        except OSError as error:
+            print(f"無法調整啟動畫面的視窗大小（{error}）。")
     try:
         set_props(
             hwnd,
