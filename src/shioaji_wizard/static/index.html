@@ -432,15 +432,25 @@
     return m ? m[1].toUpperCase() : null;
   };
   const normPath = (p) => String(p).replace(/\//g, "\\").toLowerCase();
-  // 只在「點選帳號、瀏覽選檔、啟動時自動採用」這三個事件呼叫；已存過密碼的 profile 不覆寫。
-  // 絕不 console.log 密碼／身分證字號。
-  function maybeAutofillPassword(dir, env){
-    const id = eleaderIdFromDir(dir);
-    if (!id || (env && env.ca_passwd_set)) return false;
+  function clearAutofilledPassword(){
+    if (!S.caAutofilled) return;
+    $("caPwd").value = "";
+    $("caMsg").textContent = "";
+    S.caAutofilled = false;
+  }
+  function maybeAutofillPassword(profile, env){
+    const context = JSON.stringify([S.envPath, profile?.pfx]);
+    const keepPassword = env.ca_passwd_set || $("clearPwd").checked;
+    if (keepPassword) clearAutofilledPassword();
+    if (S.caAutofillContext === context) return;
+    S.caAutofillContext = context;
+    clearAutofilledPassword();
+    const id = profile && eleaderIdFromDir(profile.dir);
+    if (!id || keepPassword || $("caPwd").value) return;
     $("caPwd").value = id;
+    S.caAutofilled = true;
     $("caMsg").textContent = "已自動帶入 eLeader 預設憑證密碼，按「儲存憑證設定」生效";
     updateMarks();
-    return true;
   }
   function renderAccounts(st){
     const box = $("acctList"), row = $("acctRow");
@@ -463,11 +473,10 @@
       $("apiKey").value=""; $("secKey").value=""; $("caPwd").value=""; $("clearPwd").checked=false;
       S.resultText = "";
       S.unlockKeys = false; S.caPathDirty = false; S.pendingPfx = r.pending_ca_path || "";
+      S.caAutofillContext = null; S.caAutofilled = false;
       await refresh();
       if (r.pending_ca_path){ $("caPath").value = r.pending_ca_path; S.caPathDirty = true; }  // 還沒存進 .env，refresh 不可洗掉
-      const entry = (S.profiles||[]).find(p => p.pfx === pfx);
-      const filled = entry ? maybeAutofillPassword(entry.dir, r.env) : false;
-      if (!filled) $("saveMsg").textContent = r.pending_ca_path ? "已切換帳號，尚未儲存過設定：按「儲存金鑰」生效" : "已切換帳號";
+      $("saveMsg").textContent = r.pending_ca_path ? "已切換帳號，尚未儲存過設定：按「儲存金鑰」生效" : "已切換帳號";
       updateMarks();
     } catch (err){ alert("切換帳號失敗：" + err.message); }
   }
@@ -630,17 +639,20 @@
     // 憑證檔欄預設留空（placeholder 說明預設位置）；只有使用者自訂過路徑才顯示。
     // S.caPathDirty＝使用者輸入了尚未儲存的值（或剛透過切換帳號／瀏覽選檔帶入）：refresh／輪詢不可覆寫。
     if (!S.caPathDirty && document.activeElement !== $("caPath")) $("caPath").value = e.ca_path_custom ? (e.ca_path || "") : "";
-    $("caPath").placeholder = e.pfx_exists && !e.ca_path_custom ? "已找到同資料夾的 Sinopac.pfx（留空即可）" : "留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔";
+    $("caPath").placeholder = e.pfx_exists && !e.ca_path_custom ? "已找到預設憑證（留空即可）" : "留空＝同資料夾的 Sinopac.pfx；或按「瀏覽…」選檔";
     $("pfxState").innerHTML = e.pfx_exists ? '<span class="stamp PASS">找到憑證</span>' : '<span class="stamp FAIL">找不到</span>';
     if (st.profile_migrated){
       // 升級遷移：ROOT 舊版設定原本就指到這張 eLeader 憑證，整份搬過去了（金鑰沒變，只是搬家）
       $("saveMsg").textContent = "已把設定搬到憑證資料夾 " + maskId(st.root);
     } else if (st.pfx_auto_adopted){
-      // 啟動時自動採用（三個觸發點之一）：帶入路徑＋（若沒存過密碼）自動帶入身分證字號
+      // 尚未建立設定檔時，保留自動採用的憑證路徑供使用者儲存。
       const p = S.profiles.find(p => p.dir === st.root);
-      if (p){ $("caPath").value = p.pfx; S.caPathDirty = !e.exists; maybeAutofillPassword(p.dir, e); }
+      if (p && !e.exists){ $("caPath").value = p.pfx; S.caPathDirty = true; S.pendingPfx = p.pfx; }
       $("saveMsg").textContent = e.exists ? "已自動切到唯一的 eLeader 憑證帳號並沿用該帳號設定" : "已自動切到唯一的 eLeader 憑證帳號，請填入金鑰後按「儲存金鑰」";
     }
+    const pfx = S.pendingPfx || (!S.caPathDirty && e.pfx_exists ? e.pfx_resolved : "");
+    const detected = pfx && S.profiles.find(p => normPath(p.pfx) === normPath(pfx));
+    if (!S.caPathDirty || S.pendingPfx) maybeAutofillPassword(detected, e);
     const li = [], caLi = [];
     if (e.decode_error){ li.push(['bad', '.env 不是 UTF-8 編碼，讀不出來。重新填入金鑰按「儲存金鑰」會覆寫它；或刪掉 .env 再重開。']); }
     else {
@@ -735,6 +747,7 @@
         $("guideStatus").textContent = "";
       } else {
         $("caPwd").value=""; $("clearPwd").checked=false; S.caPathDirty=false;
+        S.pendingPfx = ""; S.caAutofilled = false;
       }
       await refresh();
       feedback.textContent = "已儲存到 .env";
@@ -748,6 +761,8 @@
     try {
       const r = await api("/api/browse", {method:"POST"});
       if (r.path){
+        clearAutofilledPassword();
+        S.pendingPfx = "";
         $("caPath").value = r.path; S.caPathDirty = true;
         $("caMsg").textContent = "已選好憑證，按「儲存憑證設定」生效";
       } else { $("caMsg").textContent = r.error || "沒有選擇檔案"; }
@@ -762,6 +777,7 @@
       const result = await api("/api/setup-source", {method:"POST", body:JSON.stringify({mode})});
       if (result.cancelled){ $("guideStatus").textContent = "已取消選取。"; return; }
       S.resultText = ""; S.selectedSource = true; S.unlockKeys = false; S.caPathDirty = false;
+      S.pendingPfx = ""; S.caAutofillContext = null; S.caAutofilled = false;
       for (const id of ["apiKey","secKey","caPwd","caPath"]) $(id).value = "";
       $("clearPwd").checked = false;
       await refresh();
@@ -775,8 +791,19 @@
     catch (err){ alert("匯出失敗：" + err.message); }
   };
   ["apiKey","secKey","caPwd"].forEach(id => $(id).addEventListener("input", updateMarks));
-  $("caPath").addEventListener("input", () => { S.caPathDirty = true; updateMarks(); });
-  $("clearPwd").addEventListener("change", updateMarks);
+  $("caPwd").addEventListener("input", () => {
+    if (S.caAutofilled) $("caMsg").textContent = "";
+    S.caAutofilled = false;
+  });
+  $("caPath").addEventListener("input", () => {
+    clearAutofilledPassword();
+    S.pendingPfx = ""; S.caPathDirty = true;
+    updateMarks();
+  });
+  $("clearPwd").addEventListener("change", () => {
+    if ($("clearPwd").checked) clearAutofilledPassword();
+    updateMarks();
+  });
   $("btnUnlock").onclick = () => {
     if (!confirm("金鑰已驗證通過。只有要更換 API Key／Secret Key 時才需要解鎖；解鎖後貼上新金鑰並儲存，之後要重新跑 A 驗證。\n確定解鎖？")) return;
     S.unlockKeys = true; updateMarks();
